@@ -160,6 +160,13 @@ python main.py --data-dir data-docker --stop-on-error --clean-after-run --report
 
 - `workflow_dispatch`：由 `gmail-watcher` 在收到匹配邮件后触发，也可以在 Actions 页面手动点击运行。
 
+#### 当前触发边界（2026-09-11）
+
+- PR #5（合并提交 `e23205c`）已移除 `schedule`；此工作流不再按 GitHub cron 自动运行。
+- `workflow_dispatch` 保留不变，`gmail-watcher` 仍通过匹配关键词后的 GitHub dispatch 触发本流水线。
+- 2026-09-11 11:44（北京时间）收到的邮件来自旧版本的 `schedule` 运行 `34559512117`；该运行已完成邮件发送。不要把这次历史运行误判为当前仍有定时配置。
+- 排查时先看 Actions 的 `event`（`schedule` 或 `workflow_dispatch`），再看 artifact 中 `run-report.json` 的 `failed_steps` 和日志里的 `✅ 邮件发送成功`。
+
 首次启用前，请在仓库 `Settings -> Secrets and variables -> Actions` 中配置：
 
 - `EMAIL_ADDRESS_QQ`
