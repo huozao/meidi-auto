@@ -279,6 +279,8 @@ python main.py --dry-run
 [`docs/MONTHLY_SUMMARY_SPEC.md`](docs/MONTHLY_SUMMARY_SPEC.md)。它不加入每日
 `main.py` 生产步骤，默认按指定月份选择最后一天 24:00 前最新的
 “物料情况和Excel文件”邮件，保存月末快照，再扫描历史月末文件并输出物料分析 Excel。
+工作簿是否为合格月末表，以 `库存表` 表头上方是否包含目标月份最后一天（如
+`2026年08月31日`）为主判据；当天没有出入库流水只作辅助提示。
 
 本地配置放在仓库根目录 `.env`（不提交），至少包括 `EMAIL_ADDRESS_QQ`、
 `EMAIL_PASSWORD_QQ`、`MONTHLY_ARCHIVE_DIR`。常用命令：

@@ -59,7 +59,7 @@ class MonthlySummaryTests(unittest.TestCase):
             ws.title = "库存表"
             ws.append([None, None, None, None])
             ws.append([None, None, None, None])
-            ws.append([None, None, None, None])
+            ws.append([None, None, None, None, None, None, "2025年02月27日", "2025年02月28日"])
             ws.append(["物料编码", "编号", "物料名称", "单位", "外仓入库总量", "外仓出库总量", "库存"])
             ws.append(["10403002000123", "00123", "测试物料", "公斤", 100, 60, 40])
             detail = wb.create_sheet("出入库明细表")
@@ -75,6 +75,7 @@ class MonthlySummaryTests(unittest.TestCase):
             self.assertEqual(result.records[0]["inbound"], 100)
             self.assertEqual(result.records[0]["outbound"], 60)
             self.assertEqual(result.quality[0]["month_end_rows"], 1)
+            self.assertTrue(result.quality[0]["inventory_header_date_match"])
             frames = build_report_frames(result)
             self.assertIn("物料总览", frames)
             self.assertEqual(frames["物料总览"].iloc[0]["累计净变化"], 40)

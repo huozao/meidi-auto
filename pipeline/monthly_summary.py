@@ -143,8 +143,10 @@ def parse_datetime(value: object) -> datetime | None:
         for fmt in (
             "%Y/%m/%d %H:%M:%S",
             "%Y-%m-%d %H:%M:%S",
+            "%Y年%m月%d日 %H:%M:%S",
             "%Y/%m/%d",
             "%Y-%m-%d",
+            "%Y年%m月%d日",
         ):
             try:
                 parsed = datetime.strptime(text, fmt)
@@ -288,6 +290,31 @@ def _read_detail_quality(wb: openpyxl.Workbook, month: str) -> dict:
     return quality
 
 
+def _read_inventory_header_quality(ws, header_row: int, month: str) -> dict:
+    """以库存表表头上方的日期列确认工作簿是否为目标月末快照。
+
+    业务表可能没有月末当天的出入库流水，但库存表仍会生成当天的库存列，
+    因此这里的日期列是月末有效性的主判据。只扫描物料表头之前的几行，
+    避免把明细数据中的日期误当成库存快照日期。
+    """
+    cutoff_date = month_cutoff(month).date()
+    parsed_dates: set[date] = set()
+    max_row = max(1, header_row - 1)
+    for row in ws.iter_rows(min_row=1, max_row=max_row, values_only=True):
+        for value in row:
+            parsed = parse_datetime(value)
+            if parsed is not None:
+                parsed_dates.add(parsed.date())
+    ordered_dates = sorted(parsed_dates)
+    return {
+        "inventory_header_dates": ",".join(item.isoformat() for item in ordered_dates),
+        "inventory_header_last_date": ordered_dates[-1].isoformat() if ordered_dates else "",
+        "inventory_month_end_date": cutoff_date.isoformat(),
+        "inventory_header_date_match": cutoff_date in parsed_dates,
+        "inventory_header_warning": "" if cutoff_date in parsed_dates else "库存表表头上方未发现目标月末日期",
+    }
+
+
 def read_month_workbook(source: MonthlySource) -> WorkbookReadResult:
     wb = openpyxl.load_workbook(source.path, read_only=True, data_only=True)
     try:
@@ -348,9 +375,11 @@ def read_month_workbook(source: MonthlySource) -> WorkbookReadResult:
             "duplicate_material_rows": duplicate_rows,
             "missing_optional_columns": ",".join(column for column in OPTIONAL_WORKBOOK_COLUMNS if column not in headers),
         }
+        quality.update(_read_inventory_header_quality(ws, header_row, source.month))
         quality.update(_read_detail_quality(wb, source.month))
-        if quality["detail_warning"]:
-            quality["status"] = "warning"
+        if not quality["inventory_header_date_match"]:
+            quality["status"] = "error"
+            quality["error"] = quality["inventory_header_warning"]
         return WorkbookReadResult(source.month, source.path, list(rows.values()), quality)
     finally:
         wb.close()
@@ -367,8 +396,10 @@ def aggregate_sources(sources: Sequence[MonthlySource]) -> AggregationResult:
         except Exception as exc:
             quality.append({"month": source.month, "source": source.source, "file": str(source.path), "status": "error", "error": str(exc)})
             continue
-        records.extend(result.records)
         quality.append(result.quality)
+        if result.quality.get("status") == "error":
+            continue
+        records.extend(result.records)
     if not records:
         errors = "; ".join(str(item.get("error", item.get("file", ""))) for item in quality)
         raise ValueError(f"没有可汇总数据: {errors}")
@@ -601,6 +632,10 @@ def append_manifest_record(
             "detail_last_date": quality.get("detail_last_date", ""),
             "month_end_rows": quality.get("month_end_rows", 0),
             "future_rows": quality.get("future_rows", 0),
+            "inventory_header_dates": quality.get("inventory_header_dates", ""),
+            "inventory_header_last_date": quality.get("inventory_header_last_date", ""),
+            "inventory_month_end_date": quality.get("inventory_month_end_date", ""),
+            "inventory_header_date_match": quality.get("inventory_header_date_match", False),
             "quality_status": quality.get("status", ""),
             "quality_warning": quality.get("detail_warning", ""),
         })

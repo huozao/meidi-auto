@@ -126,11 +126,14 @@ def main() -> int:
         result = aggregate_sources(sources)
         errors = [item for item in result.quality if item.get("status") == "error"]
         warnings = [item for item in result.quality if item.get("status") == "warning"]
+        auxiliary = [item for item in result.quality if item.get("status") == "ok" and item.get("detail_warning")]
         print(f"✅ 物料月度记录: {len(result.records)} | 错误: {len(errors)} | 警告: {len(warnings)}")
         for item in errors:
             print(f"❌ {item.get('month')}: {item.get('error', '工作簿读取失败')}")
         for item in warnings:
             print(f"⚠️ {item.get('month')}: {item.get('detail_warning', item.get('error', '质量警告'))}")
+        for item in auxiliary:
+            print(f"ℹ️ {item.get('month')}: 出入库明细辅助提示：{item['detail_warning']}（库存表月末日期已确认）")
         if args.dry_run:
             print("ℹ️ dry-run：未写入自动归档和报告")
             return 0
