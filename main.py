@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from pipeline.models import PipelineStep
 from pipeline.steps import CLEANUP_STEP, PRODUCTION_STEPS
 from pipeline.validators import missing_step_files, validate_step_inputs, validate_step_output
@@ -280,6 +282,8 @@ def write_report(report_file: str, payload: dict, root: Path) -> None:
 
 
 def main() -> int:
+    # 本地 WSL 运行读取仓库根目录 .env；GitHub Actions 仍由环境变量注入。
+    load_dotenv(Path(__file__).resolve().with_name(".env"))
     args = parse_args()
     in_process_steps = frozenset([item.strip() for item in args.in_process_steps.split(",") if item.strip()])
 

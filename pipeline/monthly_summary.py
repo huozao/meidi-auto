@@ -50,6 +50,7 @@ class MailAttachmentCandidate:
     subject: str
     filename: str
     payload: bytes
+    html: str = ""
 
 
 @dataclass
@@ -385,6 +386,38 @@ def _imap_date(value: date) -> str:
     return value.strftime("%d-%b-%Y")
 
 
+def _parse_message_candidates(
+    *, uid: bytes, raw: bytes, metadata: bytes, subject_keyword: str, attachment_pattern: str
+) -> list[MailAttachmentCandidate]:
+    message = message_from_bytes(raw)
+    received_at = parse_imap_internaldate(metadata) or parse_mail_datetime(message.get("Date"))
+    if received_at is None:
+        return []
+    subject = decode_mime_header(message.get("Subject"))
+    if subject_keyword not in subject:
+        return []
+    html = ""
+    for part in message.walk():
+        if part.get_content_type() != "text/html" or part.get_filename():
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        html = payload.decode(charset, errors="replace")
+        break
+    candidates: list[MailAttachmentCandidate] = []
+    for part in message.walk():
+        filename = decode_mime_header(part.get_filename())
+        if not filename or not fnmatch.fnmatchcase(filename, attachment_pattern):
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            continue
+        candidates.append(MailAttachmentCandidate(uid.decode(errors="replace"), received_at, subject, filename, payload, html))
+    return candidates
+
+
 def fetch_latest_target_attachment(
     *,
     server: str,
@@ -415,27 +448,64 @@ def fetch_latest_target_attachment(
             raw = next((item[1] for item in fetched if isinstance(item, tuple) and isinstance(item[1], bytes)), None)
             if raw is None:
                 continue
-            message = message_from_bytes(raw)
-            received_at = parse_imap_internaldate(metadata) or parse_mail_datetime(message.get("Date"))
-            if received_at is None:
-                continue
-            subject = decode_mime_header(message.get("Subject"))
-            if subject_keyword not in subject:
-                continue
-            for part in message.walk():
-                filename = decode_mime_header(part.get_filename())
-                if not filename or not fnmatch.fnmatchcase(filename, attachment_pattern):
-                    continue
-                payload = part.get_payload(decode=True)
-                if payload is None:
-                    continue
-                candidates.append(MailAttachmentCandidate(uid.decode(errors="replace"), received_at, subject, filename, payload))
+            candidates.extend(_parse_message_candidates(
+                uid=uid,
+                raw=raw,
+                metadata=metadata,
+                subject_keyword=subject_keyword,
+                attachment_pattern=attachment_pattern,
+            ))
     finally:
         try:
             mail.logout()
         except Exception:
             pass
     return select_latest_candidate(candidates, cutoff)
+
+
+def fetch_latest_target_attachment_any(
+    *,
+    server: str,
+    user: str,
+    password: str,
+    mailbox: str,
+    subject_keyword: str,
+    attachment_pattern: str,
+    limit: int = 100,
+) -> MailAttachmentCandidate:
+    """只读 IMAP，在最近若干封邮件中选择最新目标附件。"""
+    candidates: list[MailAttachmentCandidate] = []
+    mail = imaplib.IMAP4_SSL(server)
+    try:
+        mail.login(user, password)
+        status, _ = mail.select(mailbox, readonly=True)
+        if status != "OK":
+            raise RuntimeError(f"无法只读打开邮箱目录: {mailbox}")
+        status, data = mail.search(None, "ALL")
+        if status != "OK":
+            raise RuntimeError("IMAP 搜索失败")
+        for uid in data[0].split()[-max(1, limit):]:
+            status, fetched = mail.fetch(uid, "(INTERNALDATE BODY.PEEK[])")
+            if status != "OK":
+                continue
+            metadata = b" ".join(item[0] for item in fetched if isinstance(item, tuple) and isinstance(item[0], bytes))
+            raw = next((item[1] for item in fetched if isinstance(item, tuple) and isinstance(item[1], bytes)), None)
+            if raw is not None:
+                candidates.extend(_parse_message_candidates(
+                    uid=uid,
+                    raw=raw,
+                    metadata=metadata,
+                    subject_keyword=subject_keyword,
+                    attachment_pattern=attachment_pattern,
+                ))
+    finally:
+        try:
+            mail.logout()
+        except Exception:
+            pass
+    if not candidates:
+        raise ValueError("最近邮件中没有符合条件的目标邮件")
+    return max(candidates, key=lambda candidate: candidate.received_at)
 
 
 def sha256_bytes(payload: bytes) -> str:
@@ -482,6 +552,27 @@ def save_month_snapshot(
         canonical_path=canonical_path,
     )
     return canonical_path
+
+
+def save_latest_mail(
+    *,
+    candidate: MailAttachmentCandidate,
+    output_dir: Path,
+) -> tuple[Path, Path | None]:
+    """保存最新邮件附件和 HTML，供人工查看；不覆盖已有文件。"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stamp = candidate.received_at.astimezone(TZ_SHANGHAI).strftime("%Y%m%d_%H%M%S")
+    safe_name = safe_filename(candidate.filename)
+    safe_path = Path(safe_name)
+    attachment_path = output_dir / f"{safe_path.stem}_{stamp}{safe_path.suffix}"
+    if not attachment_path.exists():
+        attachment_path.write_bytes(candidate.payload)
+    html_path: Path | None = None
+    if candidate.html:
+        html_path = output_dir / f"物料情况_{stamp}.html"
+        if not html_path.exists():
+            html_path.write_text(candidate.html, encoding="utf-8")
+    return attachment_path, html_path
 
 
 def append_manifest_record(

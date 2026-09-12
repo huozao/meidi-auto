@@ -34,6 +34,7 @@ IMAP_MAILBOX=INBOX
 
 MONTHLY_ARCHIVE_DIR=/mnt/c/Users/ishel/Desktop/坚果备份/A四川和裕达新材料有限公司/32重庆-美的/美的发货/月度汇总
 MONTHLY_REPORT_DIR=/mnt/c/Users/ishel/Desktop/坚果备份/A四川和裕达新材料有限公司/32重庆-美的/美的发货/月度汇总/分析结果
+LATEST_MAIL_DIR=/mnt/c/Users/ishel/Desktop/美的发货
 TARGET_MAIL_SUBJECT=物料情况和Excel文件
 TARGET_ATTACHMENT_PATTERN=总库存*.xlsx
 ```
@@ -121,6 +122,9 @@ python tools/monthly_summary.py --aggregate-only
 
 # 只检查配置、候选文件和月份，不写入文件
 python tools/monthly_summary.py --month 2026-08 --dry-run
+
+# 下载最新目标邮件供人工查看，不参与月末汇总
+python tools/download_latest_mail.py
 ```
 
 ## 验收标准

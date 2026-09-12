@@ -292,6 +292,9 @@ python tools/monthly_summary.py --month 2026-08
 
 # 只检查月份、字段和数据质量，不写入归档或报告
 python tools/monthly_summary.py --aggregate-only --dry-run
+
+# 下载最新目标邮件供人工查看
+python tools/download_latest_mail.py
 ```
 
 ## 历史工具的去向与替代方案
