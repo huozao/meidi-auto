@@ -32,7 +32,7 @@ REQUIRED_ENV_KEYS: tuple[str, ...] = (
 RETRYABLE_STEPS: tuple[str, ...] = ("020 Email download.py",)
 DEFAULT_RETRY_COUNT = 2
 DEFAULT_RETRY_BACKOFF_SECONDS = 2
-DEFAULT_IN_PROCESS_STEPS: tuple[str, ...] = ("050 image.py", "050 mailtxt.py", "051 Send an email.py")
+DEFAULT_IN_PROCESS_STEPS: tuple[str, ...] = ("050 image.py", "050 mailtxt.py", "051 Send an email.py", "052 Archive daily attachment.py")
 
 
 def parse_args() -> argparse.Namespace:

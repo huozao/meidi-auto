@@ -72,6 +72,11 @@ jobs:
           EMAIL_PASSWOR_QQ: ${{ secrets.EMAIL_PASSWOR_QQ }}
           RECIPIENT_EMAILS: ${{ secrets.RECIPIENT_EMAILS }}
           IMAP_SERVER: ${{ secrets.IMAP_SERVER || 'imap.qq.com' }}
+          DAILY_ATTACHMENT_ARCHIVE_DIR: ${{ vars.DAILY_ATTACHMENT_ARCHIVE_DIR }}
+          NUTSTORE_WEBDAV_URL: ${{ secrets.NUTSTORE_WEBDAV_URL || 'https://dav.jianguoyun.com/dav/' }}
+          NUTSTORE_WEBDAV_USER: ${{ secrets.NUTSTORE_WEBDAV_USER }}
+          NUTSTORE_WEBDAV_APP_PASSWORD: ${{ secrets.NUTSTORE_WEBDAV_APP_PASSWORD }}
+          NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR: ${{ secrets.NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR }}
         run: python main.py --data-dir data --stop-on-error --report-file data/run-report.json
 
       - name: Skip run when IMAP unreachable

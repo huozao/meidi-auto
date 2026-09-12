@@ -813,7 +813,8 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
 
     def wide(value: str, name: str) -> pd.DataFrame:
         pivot = detail.pivot_table(index="code", columns="month", values=value, aggfunc="sum", fill_value=0)
-        pivot = pivot.reindex(columns=months, fill_value=0)
+        # 月份列按最新月份在前，打开报表即可先看到最近数据。
+        pivot = pivot.reindex(columns=list(reversed(months)), fill_value=0)
         pivot.columns = [f"{month_token(month)}{name}" for month in pivot.columns]
         return _with_metadata(pivot, result.records)
 
@@ -886,10 +887,33 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
         pivot = pivot.reset_index()
         pivot.columns.name = None
         pivot = pivot.rename(columns={"company": "公司"})
-        return pivot
+        # 趋势行按月份/年度升序，最后追加各公司的累计合计行。
+        total = {index_column: "合计"}
+        for column in pivot.columns:
+            if column != index_column:
+                total[column] = pivot[column].sum()
+        return pd.concat([pivot, pd.DataFrame([total])], ignore_index=True)
 
     company_month_trend = trend_frame(company_month, "month", "领用出库数量").rename(columns={"month": "月份"})
     company_year_trend = trend_frame(company_year, "year", "年度领用出库数量").rename(columns={"year": "年度"})
+    if company_month.empty:
+        company_month_change = pd.DataFrame(columns=["月份", "公司", "本月领用出库数量", "上月领用出库数量", "环比变化", "环比变化率"])
+    else:
+        monthly_values = company_month.pivot_table(index="month", columns="company", values="outbound", aggfunc="sum", fill_value=0)
+        month_rows: list[dict] = []
+        for current_month in sorted(monthly_values.index):
+            year, month_number = map(int, current_month.split("-"))
+            previous = f"{year - 1:04d}-12" if month_number == 1 else f"{year:04d}-{month_number - 1:02d}"
+            for company in monthly_values.columns:
+                current_value = float(monthly_values.loc[current_month, company])
+                previous_value = float(monthly_values.loc[previous, company]) if previous in monthly_values.index else 0.0
+                month_rows.append({
+                    "月份": current_month, "公司": company,
+                    "本月领用出库数量": current_value, "上月领用出库数量": previous_value,
+                    "环比变化": current_value - previous_value,
+                    "环比变化率": (current_value - previous_value) / previous_value if previous_value else None,
+                })
+        company_month_change = pd.DataFrame(month_rows).sort_values(["月份", "本月领用出库数量", "公司"], ascending=[True, False, True])
     type_trend = movement.groupby(["month", "business_type"], as_index=False)["quantity"].sum()
     if type_trend.empty:
         type_trend_frame = pd.DataFrame(columns=["月份"])
@@ -919,6 +943,7 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
     frames["公司业务明细"] = movement_detail
     frames["公司领用趋势"] = company_month_trend
     frames["公司年度趋势"] = company_year_trend
+    frames["公司月度环比"] = company_month_change
     frames["业务类型趋势"] = type_trend_frame
     frames["图表"] = pd.DataFrame({"说明": [
         "领用出库按备注中的公司统一归类；借用、归还、退货、调拨等业务请查看公司业务汇总和公司业务明细。",
@@ -942,6 +967,10 @@ def write_report(frames: OrderedDict[str, pd.DataFrame], output_path: Path) -> P
                 letter = column_cells[0].column_letter
                 width = min(max(len(str(cell.value or "")) for cell in column_cells) + 2, 42)
                 ws.column_dimensions[letter].width = max(width, 10)
+            if ws.title == "公司月度环比" and ws.max_column >= 6:
+                for cell in ws.iter_cols(min_col=6, max_col=6, min_row=2):
+                    for item in cell:
+                        item.number_format = "0.00%"
         chart_ws = wb["图表"] if "图表" in wb.sheetnames else wb.create_sheet("图表")
 
         def add_line_chart(source_name: str, title: str, anchor: str) -> None:
@@ -956,8 +985,12 @@ def write_report(frames: OrderedDict[str, pd.DataFrame], output_path: Path) -> P
             chart.x_axis.title = "时间"
             chart.height = 8
             chart.width = 18
-            data = Reference(source_ws, min_col=2, max_col=source_ws.max_column, min_row=1, max_row=source_ws.max_row)
-            categories = Reference(source_ws, min_col=1, min_row=2, max_row=source_ws.max_row)
+            # 趋势表最后一行是累计合计，图表只画时间序列，避免把合计当作一个月份。
+            data_max_row = source_ws.max_row - 1 if source_ws.cell(source_ws.max_row, 1).value == "合计" else source_ws.max_row
+            if data_max_row < 2:
+                return
+            data = Reference(source_ws, min_col=2, max_col=source_ws.max_column, min_row=1, max_row=data_max_row)
+            categories = Reference(source_ws, min_col=1, min_row=2, max_row=data_max_row)
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(categories)
             chart.style = 13
@@ -985,8 +1018,8 @@ def write_report(frames: OrderedDict[str, pd.DataFrame], output_path: Path) -> P
             chart.legend.position = "r"
             chart_ws.add_chart(chart, anchor)
 
-        add_line_chart("公司领用趋势", "各公司每月领用出库趋势（前八）", "A4")
-        add_bar_chart("公司年度趋势", "各公司年度领用出库趋势（前八）", "J4")
+        add_line_chart("公司领用趋势", "各公司每月领用出库趋势", "A4")
+        add_bar_chart("公司年度趋势", "各公司年度领用出库趋势", "J4")
         add_line_chart("业务类型趋势", "各类业务数量趋势", "A22")
         wb.save(output_path)
     finally:

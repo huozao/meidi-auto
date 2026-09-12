@@ -1,0 +1,55 @@
+name: Meidi monthly closeout
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "2 16 28-31 * *"
+
+concurrency:
+  group: meidiauto-monthly-closeout
+  cancel-in-progress: false
+
+jobs:
+  closeout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gate scheduled run to Shanghai day 1
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$(TZ=Asia/Shanghai date +%d)" = "01" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "非北京时间每月 1 日，跳过本次 cron 触发"
+          fi
+      - name: Setup Python
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Verify month-end and generate report
+        if: steps.gate.outputs.run == 'true'
+        env:
+          EMAIL_ADDRESS_QQ: ${{ secrets.EMAIL_ADDRESS_QQ }}
+          EMAIL_PASSWORD_QQ: ${{ secrets.EMAIL_PASSWORD_QQ }}
+          EMAIL_PASSWOR_QQ: ${{ secrets.EMAIL_PASSWOR_QQ }}
+          RECIPIENT_EMAILS: ${{ secrets.RECIPIENT_EMAILS }}
+          MONTHLY_ALERT_RECIPIENTS: ${{ secrets.MONTHLY_ALERT_RECIPIENTS }}
+          IMAP_SERVER: ${{ secrets.IMAP_SERVER || 'imap.qq.com' }}
+          IMAP_MAILBOX: ${{ secrets.IMAP_MAILBOX || 'INBOX' }}
+          NUTSTORE_WEBDAV_URL: ${{ secrets.NUTSTORE_WEBDAV_URL || 'https://dav.jianguoyun.com/dav/' }}
+          NUTSTORE_WEBDAV_USER: ${{ secrets.NUTSTORE_WEBDAV_USER }}
+          NUTSTORE_WEBDAV_APP_PASSWORD: ${{ secrets.NUTSTORE_WEBDAV_APP_PASSWORD }}
+          NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR: ${{ secrets.NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR }}
+          NUTSTORE_REMOTE_MONTHLY_ARCHIVE_DIR: ${{ secrets.NUTSTORE_REMOTE_MONTHLY_ARCHIVE_DIR }}
+        run: python tools/monthly_closeout.py

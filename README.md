@@ -13,6 +13,7 @@
   - `pipeline/flow_map.py`：业务阶段与常见需求修改导航。
 - `script/`：业务脚本（下载邮件、合并 Excel、计算与着色、生成 HTML、发送邮件）。
 - `.github/workflows/run-daily.yml`：标准化 CI 运行工作流（由 `gmail-watcher` 触发，也支持手动运行）。
+- `.github/workflows/monthly-closeout.yml`：每月 1 日北京时间 00:02 核验月末文件并生成报告。
 - `requirements.txt`：Python 依赖。
 - `docs/PIPELINE_FLOW.md`：主流程一页图（Mermaid）+ 阅读顺序。
 - `docs/AI_FRIENDLY_REDESIGN.md`：AI 友好型重构说明（主线、边界、改动导航）。
@@ -175,6 +176,17 @@ python main.py --data-dir data-docker --stop-on-error --clean-after-run --report
 - `IMAP_SERVER`（可选）
 
 > 若 `IMAP_SERVER` Secret 留空，workflow 会自动回退到 `imap.qq.com`。
+
+### 每日附件归档与月初核验
+
+每日流程在发送邮件后执行 `052 Archive daily attachment.py`，将最终 Excel、HTML 和图片复制到 `YYYYMM` 子目录。
+本地可设置 `DAILY_ATTACHMENT_ARCHIVE_DIR` 指向 Windows 坚果云同步目录；GitHub Actions 则设置
+`NUTSTORE_WEBDAV_URL`、`NUTSTORE_WEBDAV_USER`、`NUTSTORE_WEBDAV_APP_PASSWORD`、
+`NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR` 和 `NUTSTORE_REMOTE_MONTHLY_ARCHIVE_DIR`，直接写入同一坚果云目录。
+
+月初工作流下载上一月的月末文件和每日归档，按工作簿单元格内容计算语义指纹（忽略 Excel 样式及元数据）。
+一致时才写入自动月末归档并生成报告；不一致时不覆盖月末文件，只发送人工核验邮件。
+报告中的“公司月度环比”按实际日历月列出本月、上月、变化量和变化率；“公司领用趋势”“公司年度趋势”末行是各公司的累计合计。
 
 ### GitHub Actions 跑完后，`data/` 会不会留痕？
 
