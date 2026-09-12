@@ -13,6 +13,8 @@ from pipeline.monthly_summary import (
     MonthlySource,
     aggregate_sources,
     build_report_frames,
+    classify_movement,
+    extract_company,
     month_cutoff,
     parse_imap_internaldate,
     scan_month_files,
@@ -37,6 +39,12 @@ class MonthlySummaryTests(unittest.TestCase):
         parsed = parse_imap_internaldate(b'4 (INTERNALDATE "31-Aug-2026 23:59:00 +0800")')
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed.isoformat(), "2026-08-31T23:59:00+08:00")
+
+    def test_movement_company_and_business_type(self) -> None:
+        self.assertEqual(extract_company("业务员通知借郅塑"), "重庆郅塑科技有限公司")
+        self.assertEqual(extract_company("重庆瀚海塑胶制品有限公司-材料"), "重庆瀚海塑胶制品有限公司")
+        self.assertEqual(classify_movement("供方退货", "业务员通知借郅塑", 0, 500), "借用出库")
+        self.assertEqual(classify_movement("入库", "瀚海还和裕达", 500, 0), "借用归还")
 
     def test_scan_auto_archive_takes_priority(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -65,8 +73,14 @@ class MonthlySummaryTests(unittest.TestCase):
             detail = wb.create_sheet("出入库明细表")
             detail.append([None, None])
             detail.append([None, None])
-            detail.append(["录入日期", "库存变动类别"])
-            detail.append(["2025/02/28 16:00:00", "出库"])
+            detail.append([
+                "录入日期", "客户子库", "单号", "美的编码", "物料品名", "单位", "库存变动类别",
+                "本期收入", "本期发出", "备注", "出入库日期",
+            ])
+            detail.append([
+                "2025/02/28 16:00:00", "MA1", "A1", "10403002000123", "测试物料", "公斤",
+                "出库", 0, 25, "重庆瀚海塑胶制品有限公司-材料", "2025/02/28",
+            ])
             wb.save(path)
             wb.close()
 
@@ -76,6 +90,8 @@ class MonthlySummaryTests(unittest.TestCase):
             self.assertEqual(result.records[0]["outbound"], 60)
             self.assertEqual(result.quality[0]["month_end_rows"], 1)
             self.assertTrue(result.quality[0]["inventory_header_date_match"])
+            self.assertEqual(result.movement_records[0]["company"], "重庆瀚海塑胶制品有限公司")
+            self.assertEqual(result.movement_records[0]["business_type"], "领用出库")
             frames = build_report_frames(result)
             self.assertIn("物料总览", frames)
             self.assertEqual(frames["物料总览"].iloc[0]["累计净变化"], 40)

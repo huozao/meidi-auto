@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 import openpyxl
 import pandas as pd
+from openpyxl.chart import BarChart, LineChart, Reference
 
 
 TZ_SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -34,6 +35,25 @@ MONTH_RE = re.compile(r"^(?P<year>\d{4})-(?P<month>0[1-9]|1[0-2])$")
 
 REQUIRED_WORKBOOK_COLUMNS = ("外仓入库总量", "外仓出库总量", "库存")
 OPTIONAL_WORKBOOK_COLUMNS = ("合格仓库存", "外应存", "月计划")
+
+COMPANY_ALIASES = (
+    ("重庆渝丰和科技有限公司", ("重庆渝丰和科技有限公司", "渝丰和")),
+    ("重庆恒讯联盛实业有限公司", ("重庆恒讯联盛实业有限公司", "恒讯")),
+    ("重庆郅塑科技有限公司", ("重庆郅塑科技有限公司", "郅塑", "致塑")),
+    ("重庆松亚美迪电子有限公司", ("重庆松亚美迪电子有限公司", "松亚", "松垭")),
+    ("重庆瀚海塑胶制品有限公司", ("重庆瀚海塑胶制品有限公司", "瀚海")),
+    ("重庆联翼森科技有限公司", ("重庆联翼森科技有限公司", "联翼森")),
+    ("重庆迅飞汽车零部件有限公司", ("重庆迅飞汽车零部件有限公司", "讯飞")),
+    ("重庆欧盼科技发展有限公司", ("重庆欧盼科技发展有限公司", "欧盼")),
+    ("重庆西雄机车零部件有限公司", ("重庆西雄机车零部件有限公司", "西雄")),
+    ("四川润光科技发展有限公司", ("四川润光科技发展有限公司", "润光")),
+    ("重庆汉美实业有限公司", ("重庆汉美实业有限公司", "汉美")),
+    ("广东佳适新材料科技有限公司", ("广东佳适新材料科技有限公司", "佳适")),
+    ("重庆昊泰塑胶制品有限公司", ("重庆昊泰塑胶制品有限公司", "昊泰")),
+    ("重庆赋域电子科技有限公司", ("重庆赋域电子科技有限公司", "赋域")),
+    ("重庆工厂", ("重庆工厂",)),
+    ("美的", ("美的",)),
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +79,7 @@ class WorkbookReadResult:
     path: Path
     records: list[dict]
     quality: dict
+    movement_records: list[dict]
 
 
 @dataclass
@@ -66,6 +87,7 @@ class AggregationResult:
     records: list[dict]
     quality: list[dict]
     sources: list[MonthlySource]
+    movement_records: list[dict]
 
 
 def normalize_text(value: object) -> str:
@@ -82,6 +104,93 @@ def normalize_code(value: object) -> str:
     if isinstance(value, int):
         return str(value)
     return normalize_text(value)
+
+
+def extract_company(note: object) -> str:
+    """从备注提取统一公司名；保留无法可靠归属的备注原文。"""
+    text = normalize_text(note)
+    if not text:
+        return "未备注"
+    for canonical, aliases in COMPANY_ALIASES:
+        if any(alias in text for alias in aliases):
+            return canonical
+    if text.endswith("-材料"):
+        return text[:-3].strip() or "未标注"
+    if "厂家" in text:
+        return "厂家"
+    if "车间" in text or "无需求" in text:
+        return "内部调整"
+    if text.startswith("调拨"):
+        return text[2:].strip() or "内部调拨"
+    return text
+
+
+def classify_movement(category: object, note: object, inbound: float, outbound: float) -> str:
+    """将 ERP 库存变动分类为可读的业务类型。"""
+    category_text = normalize_text(category)
+    note_text = normalize_text(note)
+    if "借" in note_text and any(token in note_text for token in ("退", "换")):
+        return "借用/退换混合"
+    if "借" in note_text and outbound:
+        return "借用出库"
+    if category_text == "出库":
+        return "领用出库"
+    if category_text == "入库":
+        if "还" in note_text:
+            return "借用归还"
+        if any(token in note_text for token in ("退货", "换货")):
+            return "退货/换货入库"
+        return "普通入库"
+    if "调出" in category_text:
+        return "不合格品调出"
+    if "调入" in category_text:
+        return "不合格品调入"
+    if "退货" in category_text or any(token in note_text for token in ("退货", "换货", "退回厂家")):
+        return "退货/换货"
+    return category_text or "其他"
+
+
+def _read_movement_rows(wb: openpyxl.Workbook, month: str) -> list[dict]:
+    if "出入库明细表" not in wb.sheetnames:
+        return []
+    ws = wb["出入库明细表"]
+    try:
+        header_row, headers = _find_header(ws, {"库存变动类别"})
+    except ValueError:
+        return []
+    code_column = headers.get("美的编码", headers.get("代编码"))
+    name_column = headers.get("物料品名")
+    date_column = headers.get("出入库日期", headers.get("录入日期"))
+    if code_column is None or name_column is None or date_column is None:
+        return []
+    year = parse_month(month)[0]
+    movement_records: list[dict] = []
+    for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+        code = normalize_code(row[code_column] if code_column < len(row) else None)
+        name = normalize_text(row[name_column] if name_column < len(row) else None)
+        parsed_date = parse_datetime(row[date_column] if date_column < len(row) else None)
+        if not code or parsed_date is None:
+            continue
+        category = normalize_text(row[headers["库存变动类别"]] if headers["库存变动类别"] < len(row) else None)
+        inbound = to_number(row[headers["本期收入"]]) if "本期收入" in headers and headers["本期收入"] < len(row) else 0.0
+        outbound = to_number(row[headers["本期发出"]]) if "本期发出" in headers and headers["本期发出"] < len(row) else 0.0
+        note = normalize_text(row[headers["备注"]]) if "备注" in headers and headers["备注"] < len(row) else ""
+        movement_records.append({
+            "month": month,
+            "year": year,
+            "date": parsed_date.date().isoformat(),
+            "code": code,
+            "name": name,
+            "unit": normalize_text(row[headers["单位"]]) if "单位" in headers and headers["单位"] < len(row) else "",
+            "category": category,
+            "business_type": classify_movement(category, note, inbound, outbound),
+            "company": extract_company(note),
+            "note": note,
+            "inbound": inbound,
+            "outbound": outbound,
+            "quantity": outbound if outbound else inbound,
+        })
+    return movement_records
 
 
 def to_number(value: object) -> float:
@@ -377,10 +486,12 @@ def read_month_workbook(source: MonthlySource) -> WorkbookReadResult:
         }
         quality.update(_read_inventory_header_quality(ws, header_row, source.month))
         quality.update(_read_detail_quality(wb, source.month))
+        movement_records = _read_movement_rows(wb, source.month)
         if not quality["inventory_header_date_match"]:
             quality["status"] = "error"
             quality["error"] = quality["inventory_header_warning"]
-        return WorkbookReadResult(source.month, source.path, list(rows.values()), quality)
+        quality["movement_row_count"] = len(movement_records)
+        return WorkbookReadResult(source.month, source.path, list(rows.values()), quality, movement_records)
     finally:
         wb.close()
 
@@ -390,6 +501,7 @@ def aggregate_sources(sources: Sequence[MonthlySource]) -> AggregationResult:
         raise ValueError("没有可汇总的月末文件")
     records: list[dict] = []
     quality: list[dict] = []
+    movement_records: list[dict] = []
     for source in sources:
         try:
             result = read_month_workbook(source)
@@ -400,10 +512,11 @@ def aggregate_sources(sources: Sequence[MonthlySource]) -> AggregationResult:
         if result.quality.get("status") == "error":
             continue
         records.extend(result.records)
+        movement_records.extend(result.movement_records)
     if not records:
         errors = "; ".join(str(item.get("error", item.get("file", ""))) for item in quality)
         raise ValueError(f"没有可汇总数据: {errors}")
-    return AggregationResult(records=records, quality=quality, sources=list(sources))
+    return AggregationResult(records=records, quality=quality, sources=list(sources), movement_records=movement_records)
 
 
 def select_latest_candidate(candidates: Iterable[MailAttachmentCandidate], cutoff: datetime) -> MailAttachmentCandidate:
@@ -636,6 +749,7 @@ def append_manifest_record(
             "inventory_header_last_date": quality.get("inventory_header_last_date", ""),
             "inventory_month_end_date": quality.get("inventory_month_end_date", ""),
             "inventory_header_date_match": quality.get("inventory_header_date_match", False),
+            "movement_row_count": quality.get("movement_row_count", 0),
             "quality_status": quality.get("status", ""),
             "quality_warning": quality.get("detail_warning", ""),
         })
@@ -696,6 +810,73 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
         return _with_metadata(pivot, result.records)
 
     quality = pd.DataFrame(result.quality)
+    movement = pd.DataFrame(result.movement_records)
+    if movement.empty:
+        movement = pd.DataFrame(columns=[
+            "month", "year", "date", "code", "name", "unit", "category",
+            "business_type", "company", "note", "inbound", "outbound", "quantity",
+        ])
+    movement_detail = movement.rename(columns={
+        "month": "月份", "year": "年度", "date": "日期", "code": "物料编码", "name": "物料名称",
+        "unit": "单位", "category": "原始变动类别", "business_type": "业务类型", "company": "公司",
+        "note": "备注", "inbound": "入库数量", "outbound": "出库数量", "quantity": "业务数量",
+    })
+    movement_detail = movement_detail[[
+        "月份", "年度", "日期", "公司", "业务类型", "原始变动类别", "物料编码", "物料名称",
+        "单位", "入库数量", "出库数量", "业务数量", "备注",
+    ]].sort_values(["月份", "公司", "业务类型", "物料编码"])
+
+    usage = movement[movement["business_type"] == "领用出库"].copy()
+    usage_group_columns = ["month", "company", "code", "name", "unit"]
+    if usage.empty:
+        monthly_usage = pd.DataFrame(columns=["月份", "公司", "物料编码", "物料名称", "单位", "领用出库数量", "出库笔数"])
+        annual_usage = pd.DataFrame(columns=["年度", "公司", "物料编码", "物料名称", "单位", "年度领用出库数量", "出库笔数"])
+        company_month = pd.DataFrame()
+        company_year = pd.DataFrame()
+    else:
+        monthly_usage = usage.groupby(usage_group_columns, as_index=False).agg(
+            领用出库数量=("outbound", "sum"),
+            出库笔数=("outbound", "size"),
+        ).rename(columns={"month": "月份", "company": "公司", "code": "物料编码", "name": "物料名称", "unit": "单位"})
+        monthly_usage = monthly_usage.sort_values(["月份", "领用出库数量", "公司", "物料编码"], ascending=[True, False, True, True])
+        annual_usage = usage.groupby(["year", "company", "code", "name", "unit"], as_index=False).agg(
+            年度领用出库数量=("outbound", "sum"),
+            出库笔数=("outbound", "size"),
+        ).rename(columns={"year": "年度", "company": "公司", "code": "物料编码", "name": "物料名称", "unit": "单位"})
+        annual_usage = annual_usage.sort_values(["年度", "年度领用出库数量", "公司", "物料编码"], ascending=[True, False, True, True])
+        company_month = usage.groupby(["month", "company"], as_index=False)["outbound"].sum()
+        company_year = usage.groupby(["year", "company"], as_index=False)["outbound"].sum()
+
+    business_summary = movement.groupby(["month", "company", "business_type"], as_index=False).agg(
+        入库数量=("inbound", "sum"),
+        出库数量=("outbound", "sum"),
+        业务数量=("quantity", "sum"),
+        笔数=("quantity", "size"),
+    ).rename(columns={"month": "月份", "company": "公司", "business_type": "业务类型"})
+    business_summary["年度"] = business_summary["月份"].str[:4]
+    business_summary = business_summary[["月份", "年度", "公司", "业务类型", "入库数量", "出库数量", "业务数量", "笔数"]].sort_values(["月份", "公司", "业务类型"])
+
+    def trend_frame(grouped: pd.DataFrame, index_column: str, value_name: str) -> pd.DataFrame:
+        if grouped.empty:
+            return pd.DataFrame(columns=[index_column])
+        pivot = grouped.pivot_table(index=index_column, columns="company", values="outbound", aggfunc="sum", fill_value=0)
+        totals = pivot.sum(axis=0).sort_values(ascending=False)
+        pivot = pivot.loc[:, list(totals.head(8).index)]
+        pivot = pivot.reset_index()
+        pivot.columns.name = None
+        pivot = pivot.rename(columns={"company": "公司"})
+        return pivot
+
+    company_month_trend = trend_frame(company_month, "month", "领用出库数量").rename(columns={"month": "月份"})
+    company_year_trend = trend_frame(company_year, "year", "年度领用出库数量").rename(columns={"year": "年度"})
+    type_trend = movement.groupby(["month", "business_type"], as_index=False)["quantity"].sum()
+    if type_trend.empty:
+        type_trend_frame = pd.DataFrame(columns=["月份"])
+    else:
+        type_trend_frame = type_trend.pivot_table(index="month", columns="business_type", values="quantity", aggfunc="sum", fill_value=0).reset_index()
+        type_trend_frame.columns.name = None
+        type_trend_frame = type_trend_frame.rename(columns={"month": "月份"})
+
     frames: OrderedDict[str, pd.DataFrame] = OrderedDict()
     frames["物料总览"] = overview
     frames["入库汇总"] = wide("inbound", "外仓入库总量")
@@ -709,6 +890,17 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
     frames["计划与库存"] = plan_detail.sort_values(["月份", "物料编码"])
     frames["物料明细"] = detail_frame
     frames["数据质量"] = quality
+    frames["公司月度领用"] = monthly_usage
+    frames["公司年度领用"] = annual_usage
+    frames["公司业务汇总"] = business_summary
+    frames["公司业务明细"] = movement_detail
+    frames["公司领用趋势"] = company_month_trend
+    frames["公司年度趋势"] = company_year_trend
+    frames["业务类型趋势"] = type_trend_frame
+    frames["图表"] = pd.DataFrame({"说明": [
+        "领用出库按备注中的公司统一归类；借用、归还、退货、调拨等业务请查看公司业务汇总和公司业务明细。",
+        "图表默认展示领用出库量最高的前 8 家公司。",
+    ]})
     return frames
 
 
@@ -727,6 +919,52 @@ def write_report(frames: OrderedDict[str, pd.DataFrame], output_path: Path) -> P
                 letter = column_cells[0].column_letter
                 width = min(max(len(str(cell.value or "")) for cell in column_cells) + 2, 42)
                 ws.column_dimensions[letter].width = max(width, 10)
+        chart_ws = wb["图表"] if "图表" in wb.sheetnames else wb.create_sheet("图表")
+
+        def add_line_chart(source_name: str, title: str, anchor: str) -> None:
+            if source_name not in wb.sheetnames:
+                return
+            source_ws = wb[source_name]
+            if source_ws.max_row < 2 or source_ws.max_column < 2:
+                return
+            chart = LineChart()
+            chart.title = title
+            chart.y_axis.title = "数量"
+            chart.x_axis.title = "时间"
+            chart.height = 8
+            chart.width = 18
+            data = Reference(source_ws, min_col=2, max_col=source_ws.max_column, min_row=1, max_row=source_ws.max_row)
+            categories = Reference(source_ws, min_col=1, min_row=2, max_row=source_ws.max_row)
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(categories)
+            chart.style = 13
+            chart.legend.position = "r"
+            chart_ws.add_chart(chart, anchor)
+
+        def add_bar_chart(source_name: str, title: str, anchor: str) -> None:
+            if source_name not in wb.sheetnames:
+                return
+            source_ws = wb[source_name]
+            if source_ws.max_row < 2 or source_ws.max_column < 2:
+                return
+            chart = BarChart()
+            chart.type = "bar"
+            chart.style = 10
+            chart.title = title
+            chart.y_axis.title = "公司"
+            chart.x_axis.title = "数量"
+            chart.height = 8
+            chart.width = 18
+            data = Reference(source_ws, min_col=2, max_col=source_ws.max_column, min_row=1, max_row=source_ws.max_row)
+            categories = Reference(source_ws, min_col=1, min_row=2, max_row=source_ws.max_row)
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(categories)
+            chart.legend.position = "r"
+            chart_ws.add_chart(chart, anchor)
+
+        add_line_chart("公司领用趋势", "各公司每月领用出库趋势（前八）", "A4")
+        add_bar_chart("公司年度趋势", "各公司年度领用出库趋势（前八）", "J4")
+        add_line_chart("业务类型趋势", "各类业务数量趋势", "A22")
         wb.save(output_path)
     finally:
         wb.close()
