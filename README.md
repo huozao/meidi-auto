@@ -273,6 +273,27 @@ python main.py --dry-run
 - `RECIPIENT_EMAILS`（必需，例：`a@example.com,b@example.com`）
 - `IMAP_SERVER`（可选，默认 `imap.qq.com`）
 
+## 月末邮件与物料汇总
+
+月度汇总已迁移到 WSL 中的 `tools/monthly_summary.py`，设计和数据边界见
+[`docs/MONTHLY_SUMMARY_SPEC.md`](docs/MONTHLY_SUMMARY_SPEC.md)。它不加入每日
+`main.py` 生产步骤，默认按指定月份选择最后一天 24:00 前最新的
+“物料情况和Excel文件”邮件，保存月末快照，再扫描历史月末文件并输出物料分析 Excel。
+
+本地配置放在仓库根目录 `.env`（不提交），至少包括 `EMAIL_ADDRESS_QQ`、
+`EMAIL_PASSWORD_QQ`、`MONTHLY_ARCHIVE_DIR`。常用命令：
+
+```bash
+# 只用现有月末文件生成报告，不访问邮箱
+python tools/monthly_summary.py --aggregate-only
+
+# 下载指定月份月末邮件、归档并生成全量报告
+python tools/monthly_summary.py --month 2026-08
+
+# 只检查月份、字段和数据质量，不写入归档或报告
+python tools/monthly_summary.py --aggregate-only --dry-run
+```
+
 ## 历史工具的去向与替代方案
 
 2026-09-08 从 MeidiAuto 收编本架构时，下列脚本随主线一起清理。它们都还在 git 历史里，用
