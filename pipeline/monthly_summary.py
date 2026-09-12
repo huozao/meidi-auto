@@ -55,6 +55,12 @@ COMPANY_ALIASES = (
     ("美的", ("美的",)),
 )
 
+SUB_LIBRARY_COMPANIES = {
+    "MA1111": "重庆工厂",
+    "MA1141": "MA1141",
+    "MS1121": "MS1121",
+}
+
 
 @dataclass(frozen=True)
 class MonthlySource:
@@ -106,11 +112,12 @@ def normalize_code(value: object) -> str:
     return normalize_text(value)
 
 
-def extract_company(note: object) -> str:
+def extract_company(note: object, sub_library: object = "") -> str:
     """从备注提取统一公司名；保留无法可靠归属的备注原文。"""
     text = normalize_text(note)
     if not text:
-        return "未备注"
+        sub_library_text = normalize_text(sub_library)
+        return SUB_LIBRARY_COMPANIES.get(sub_library_text, "未备注")
     for canonical, aliases in COMPANY_ALIASES:
         if any(alias in text for alias in aliases):
             return canonical
@@ -172,6 +179,7 @@ def _read_movement_rows(wb: openpyxl.Workbook, month: str) -> list[dict]:
         if not code or parsed_date is None:
             continue
         category = normalize_text(row[headers["库存变动类别"]] if headers["库存变动类别"] < len(row) else None)
+        sub_library = normalize_text(row[headers["客户子库"]]) if "客户子库" in headers and headers["客户子库"] < len(row) else ""
         inbound = to_number(row[headers["本期收入"]]) if "本期收入" in headers and headers["本期收入"] < len(row) else 0.0
         outbound = to_number(row[headers["本期发出"]]) if "本期发出" in headers and headers["本期发出"] < len(row) else 0.0
         note = normalize_text(row[headers["备注"]]) if "备注" in headers and headers["备注"] < len(row) else ""
@@ -184,7 +192,7 @@ def _read_movement_rows(wb: openpyxl.Workbook, month: str) -> list[dict]:
             "unit": normalize_text(row[headers["单位"]]) if "单位" in headers and headers["单位"] < len(row) else "",
             "category": category,
             "business_type": classify_movement(category, note, inbound, outbound),
-            "company": extract_company(note),
+            "company": extract_company(note, sub_library),
             "note": note,
             "inbound": inbound,
             "outbound": outbound,

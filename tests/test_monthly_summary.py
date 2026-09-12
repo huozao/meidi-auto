@@ -43,6 +43,9 @@ class MonthlySummaryTests(unittest.TestCase):
     def test_movement_company_and_business_type(self) -> None:
         self.assertEqual(extract_company("业务员通知借郅塑"), "重庆郅塑科技有限公司")
         self.assertEqual(extract_company("重庆瀚海塑胶制品有限公司-材料"), "重庆瀚海塑胶制品有限公司")
+        self.assertEqual(extract_company("", "MA1111"), "重庆工厂")
+        self.assertEqual(extract_company("", "MA1141"), "MA1141")
+        self.assertEqual(extract_company("", "MS1121"), "MS1121")
         self.assertEqual(classify_movement("供方退货", "业务员通知借郅塑", 0, 500), "借用出库")
         self.assertEqual(classify_movement("入库", "瀚海还和裕达", 500, 0), "借用归还")
 
