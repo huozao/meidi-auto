@@ -831,6 +831,8 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
     if usage.empty:
         monthly_usage = pd.DataFrame(columns=["月份", "公司", "物料编码", "物料名称", "单位", "领用出库数量", "出库笔数"])
         annual_usage = pd.DataFrame(columns=["年度", "公司", "物料编码", "物料名称", "单位", "年度领用出库数量", "出库笔数"])
+        company_month_summary = pd.DataFrame(columns=["月份", "公司", "领用出库数量", "出库笔数", "物料种类数"])
+        company_year_summary = pd.DataFrame(columns=["年度", "公司", "年度领用出库数量", "出库笔数", "物料种类数"])
         company_month = pd.DataFrame()
         company_year = pd.DataFrame()
     else:
@@ -844,6 +846,16 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
             出库笔数=("outbound", "size"),
         ).rename(columns={"year": "年度", "company": "公司", "code": "物料编码", "name": "物料名称", "unit": "单位"})
         annual_usage = annual_usage.sort_values(["年度", "年度领用出库数量", "公司", "物料编码"], ascending=[True, False, True, True])
+        company_month_summary = usage.groupby(["month", "company"], as_index=False).agg(
+            领用出库数量=("outbound", "sum"),
+            出库笔数=("outbound", "size"),
+            物料种类数=("code", "nunique"),
+        ).rename(columns={"month": "月份", "company": "公司"}).sort_values(["月份", "领用出库数量", "公司"], ascending=[True, False, True])
+        company_year_summary = usage.groupby(["year", "company"], as_index=False).agg(
+            年度领用出库数量=("outbound", "sum"),
+            出库笔数=("outbound", "size"),
+            物料种类数=("code", "nunique"),
+        ).rename(columns={"year": "年度", "company": "公司"}).sort_values(["年度", "年度领用出库数量", "公司"], ascending=[True, False, True])
         company_month = usage.groupby(["month", "company"], as_index=False)["outbound"].sum()
         company_year = usage.groupby(["year", "company"], as_index=False)["outbound"].sum()
 
@@ -892,6 +904,8 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
     frames["数据质量"] = quality
     frames["公司月度领用"] = monthly_usage
     frames["公司年度领用"] = annual_usage
+    frames["公司月度汇总"] = company_month_summary
+    frames["公司年度汇总"] = company_year_summary
     frames["公司业务汇总"] = business_summary
     frames["公司业务明细"] = movement_detail
     frames["公司领用趋势"] = company_month_trend
