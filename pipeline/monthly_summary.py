@@ -881,7 +881,8 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
             return pd.DataFrame(columns=[index_column])
         pivot = grouped.pivot_table(index=index_column, columns="company", values="outbound", aggfunc="sum", fill_value=0)
         totals = pivot.sum(axis=0).sort_values(ascending=False)
-        pivot = pivot.loc[:, list(totals.head(8).index)]
+        # 趋势数据表保留全部公司；图表和汇总表不应因“前 8 家”截断而隐藏小体量公司。
+        pivot = pivot.loc[:, list(totals.index)]
         pivot = pivot.reset_index()
         pivot.columns.name = None
         pivot = pivot.rename(columns={"company": "公司"})
@@ -921,7 +922,7 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
     frames["业务类型趋势"] = type_trend_frame
     frames["图表"] = pd.DataFrame({"说明": [
         "领用出库按备注中的公司统一归类；借用、归还、退货、调拨等业务请查看公司业务汇总和公司业务明细。",
-        "图表默认展示领用出库量最高的前 8 家公司。",
+        "公司领用趋势和年度趋势保留全部公司，便于查看 MA1141、MS1121 等小体量公司的变化。",
     ]})
     return frames
 
