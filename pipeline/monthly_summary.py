@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 import openpyxl
 import pandas as pd
 from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.styles import Font, PatternFill
 
 
 TZ_SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -793,6 +794,41 @@ def _with_metadata(frame: pd.DataFrame, records: list[dict]) -> pd.DataFrame:
     return merged.rename(columns={"code": "物料编码", "short_code": "编号", "name": "物料名称", "unit": "单位"})
 
 
+def _append_total_row(frame: pd.DataFrame, label: str, amount_columns: Sequence[str], label_column: str = "编号") -> pd.DataFrame:
+    """为可相加数量追加展示用合计行，不对平均值、比例和分类字段求和。"""
+    if frame.empty:
+        return frame
+    total = {column: "" for column in frame.columns}
+    total[label_column] = label
+    for column in amount_columns:
+        if column in frame.columns:
+            total[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0).sum()
+    return pd.concat([frame, pd.DataFrame([total])], ignore_index=True)
+
+
+def _append_period_totals(
+    frame: pd.DataFrame,
+    period_column: str,
+    amount_columns: Sequence[str],
+    label: str,
+    label_column: str = "公司",
+) -> pd.DataFrame:
+    """在每个时间段的明细末尾追加一次合计，保留各期间可直接复用的分母。"""
+    if frame.empty:
+        return frame
+    pieces: list[pd.DataFrame] = []
+    for period, group in frame.groupby(period_column, sort=True, dropna=False):
+        pieces.append(group)
+        total = {column: "" for column in frame.columns}
+        total[period_column] = period
+        total[label_column] = label
+        for column in amount_columns:
+            if column in group.columns:
+                total[column] = pd.to_numeric(group[column], errors="coerce").fillna(0).sum()
+        pieces.append(pd.DataFrame([total]))
+    return pd.concat(pieces, ignore_index=True)
+
+
 def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFrame]:
     detail = pd.DataFrame(result.records)
     months = sorted(detail["month"].unique())
@@ -829,13 +865,19 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
     overview = pd.DataFrame(summary_rows).sort_values(["累计出库", "code"], ascending=[False, True]).rename(columns={
         "code": "物料编码", "short_code": "编号", "name": "物料名称", "unit": "单位",
     })
+    overview = _append_total_row(
+        overview,
+        "合计",
+        ("累计入库", "累计出库", "累计净变化", "最新库存", "最新合格仓库存", "最新外应存", "最新月计划"),
+    )
 
     def wide(value: str, name: str) -> pd.DataFrame:
         pivot = detail.pivot_table(index="code", columns="month", values=value, aggfunc="sum", fill_value=0)
         # 月份列按最新月份在前，打开报表即可先看到最近数据。
         pivot = pivot.reindex(columns=list(reversed(months)), fill_value=0)
         pivot.columns = [f"{month_token(month)}{name}" for month in pivot.columns]
-        return _with_metadata(pivot, result.records)
+        wide_frame = _with_metadata(pivot, result.records)
+        return _append_total_row(wide_frame, "合计", tuple(pivot.columns))
 
     quality = pd.DataFrame(result.quality)
     movement = pd.DataFrame(result.movement_records)
@@ -887,6 +929,17 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
         company_month = usage.groupby(["month", "company"], as_index=False)["outbound"].sum()
         company_year = usage.groupby(["year", "company"], as_index=False)["outbound"].sum()
 
+        monthly_denominator = company_month_summary.groupby("月份")["领用出库数量"].transform("sum")
+        company_month_summary["占全部领用出库比例"] = company_month_summary["领用出库数量"] / monthly_denominator
+        annual_denominator = company_year_summary.groupby("年度")["年度领用出库数量"].transform("sum")
+        company_year_summary["占全部领用出库比例"] = company_year_summary["年度领用出库数量"] / annual_denominator
+        company_month_summary = _append_period_totals(
+            company_month_summary, "月份", ("领用出库数量", "出库笔数"), "全部领用出库合计"
+        )
+        company_year_summary = _append_period_totals(
+            company_year_summary, "年度", ("年度领用出库数量", "出库笔数"), "全部领用出库合计"
+        )
+
     business_summary = movement.groupby(["month", "company", "business_type"], as_index=False).agg(
         入库数量=("inbound", "sum"),
         出库数量=("outbound", "sum"),
@@ -895,6 +948,9 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
     ).rename(columns={"month": "月份", "company": "公司", "business_type": "业务类型"})
     business_summary["年度"] = business_summary["月份"].str[:4]
     business_summary = business_summary[["月份", "年度", "公司", "业务类型", "入库数量", "出库数量", "业务数量", "笔数"]].sort_values(["月份", "公司", "业务类型"])
+    business_summary = _append_period_totals(
+        business_summary, "月份", ("入库数量", "出库数量", "业务数量", "笔数"), "全部公司合计"
+    )
 
     def trend_frame(grouped: pd.DataFrame, index_column: str, value_name: str) -> pd.DataFrame:
         if grouped.empty:
@@ -940,6 +996,7 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
         type_trend_frame = type_trend.pivot_table(index="month", columns="business_type", values="quantity", aggfunc="sum", fill_value=0).reset_index()
         type_trend_frame.columns.name = None
         type_trend_frame = type_trend_frame.rename(columns={"month": "月份"})
+        type_trend_frame = _append_total_row(type_trend_frame, "合计", tuple(column for column in type_trend_frame.columns if column != "月份"), label_column="月份")
 
     frames: OrderedDict[str, pd.DataFrame] = OrderedDict()
     frames["物料总览"] = overview
@@ -951,7 +1008,11 @@ def build_report_frames(result: AggregationResult) -> OrderedDict[str, pd.DataFr
         "month": "月份", "code": "物料编码", "short_code": "编号", "name": "物料名称", "unit": "单位",
         "monthly_plan": "月计划", "external_required": "外应存", "month_end_stock": "月末库存", "source_file": "来源文件",
     })
-    frames["计划与库存"] = plan_detail.sort_values(["月份", "物料编码"])
+    plan_detail = plan_detail.sort_values(["月份", "物料编码"])
+    plan_detail = _append_period_totals(
+        plan_detail, "月份", ("月计划", "外应存", "月末库存"), "合计", label_column="编号"
+    )
+    frames["计划与库存"] = plan_detail
     frames["物料明细"] = detail_frame
     frames["数据质量"] = quality
     frames["公司月度领用"] = monthly_usage
@@ -978,6 +1039,7 @@ def write_report(frames: OrderedDict[str, pd.DataFrame], output_path: Path) -> P
             frame.to_excel(writer, index=False, sheet_name=sheet_name)
     wb = openpyxl.load_workbook(output_path)
     try:
+        total_fill = PatternFill(start_color="DCECFB", end_color="DCECFB", fill_type="solid")
         for ws in wb.worksheets:
             ws.freeze_panes = "A2"
             if ws.max_row >= 1 and ws.max_column >= 1:
@@ -990,6 +1052,16 @@ def write_report(frames: OrderedDict[str, pd.DataFrame], output_path: Path) -> P
                 for cell in ws.iter_cols(min_col=6, max_col=6, min_row=2):
                     for item in cell:
                         item.number_format = "0.00%"
+            headers = {str(cell.value): cell.column for cell in ws[1] if cell.value is not None}
+            ratio_col = headers.get("占全部领用出库比例")
+            if ratio_col:
+                for row in range(2, ws.max_row + 1):
+                    ws.cell(row=row, column=ratio_col).number_format = "0.00%"
+            for row in ws.iter_rows(min_row=2):
+                if any(str(cell.value or "") in {"合计", "全部领用出库合计", "全部公司合计"} for cell in row):
+                    for cell in row:
+                        cell.fill = total_fill
+                        cell.font = Font(bold=True)
         chart_ws = wb["图表"] if "图表" in wb.sheetnames else wb.create_sheet("图表")
 
         def add_line_chart(source_name: str, title: str, anchor: str) -> None:
@@ -1030,8 +1102,11 @@ def write_report(frames: OrderedDict[str, pd.DataFrame], output_path: Path) -> P
             chart.x_axis.title = "数量"
             chart.height = 8
             chart.width = 18
-            data = Reference(source_ws, min_col=2, max_col=source_ws.max_column, min_row=1, max_row=source_ws.max_row)
-            categories = Reference(source_ws, min_col=1, min_row=2, max_row=source_ws.max_row)
+            data_max_row = source_ws.max_row - 1 if source_ws.cell(source_ws.max_row, 1).value == "合计" else source_ws.max_row
+            if data_max_row < 2:
+                return
+            data = Reference(source_ws, min_col=2, max_col=source_ws.max_column, min_row=1, max_row=data_max_row)
+            categories = Reference(source_ws, min_col=1, min_row=2, max_row=data_max_row)
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(categories)
             chart.legend.position = "r"

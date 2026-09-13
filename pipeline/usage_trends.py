@@ -131,10 +131,14 @@ def _rows_html(rows: list[dict], months: tuple[str, ...], current_month: str, cu
             cls = "code" if index == 0 else "num" if 1 <= index <= len(months) + 1 else "today-change" if index == delta_index else "unit"
             cells.append(f"<td class='{cls}'>{rendered}</td>")
         out.append("<tr>" + "".join(cells) + "</tr>")
+    total_cells = ["<td class='total-label'>全部物料出库合计</td>"]
+    total_cells.extend(f"<td class='num'>{_fmt(pivot[month].sum())}</td>" for month in (*months, current_month))
+    total_cells.extend([f"<td class='today-change'>{_delta(pivot['今日变化'].sum())}</td>", "<td class='unit'>kg</td>"])
+    out.append("<tr class='total-row'>" + "".join(total_cells) + "</tr>")
     return "".join(out) + "</tbody></table></div>"
 
 
-def _companies_html(rows: list[dict], months: tuple[str, ...], current_month: str, current_date: str) -> str:
+def _companies_html(rows: list[dict], all_rows: list[dict], months: tuple[str, ...], current_month: str, current_date: str) -> str:
     frame = pd.DataFrame(rows)
     if frame.empty:
         return "<p>没有可识别的领用公司出库记录。</p>"
@@ -145,10 +149,16 @@ def _companies_html(rows: list[dict], months: tuple[str, ...], current_month: st
     companies = list(history.head(5).index)
     if not companies:
         return "<p>近三个月没有领用公司出库记录。</p>"
+    all_usage = pd.DataFrame(all_rows)
+    all_usage = all_usage[(all_usage["business_type"] == "领用出库") & (all_usage["outbound"].map(lambda value: float(value or 0) > 0))].copy()
+    all_totals = {month: float(all_usage.loc[all_usage["month"] == month, "outbound"].sum()) for month in (*months, current_month)}
+    all_today_total = float(all_usage.loc[all_usage["date"] == current_date, "outbound"].sum())
     out = ["<div class='table-wrap'><table class='company'><colgroup><col class='rank-col'><col class='company-col'><col class='total-col'><col class='code-col'>",
            *["<col class='month-col'>" for _ in (*months, current_month)],
            "<col class='delta-col'><col class='unit-col'></colgroup><thead><tr><th>排名</th><th>公司</th><th>近3月总量</th><th>编号</th>",
            *[f"<th>{html.escape(month)}</th>" for month in (*months, current_month)], "<th>今日变化</th><th>单位</th></tr></thead><tbody>"]
+    company_totals = {month: 0.0 for month in (*months, current_month)}
+    today_total = 0.0
     for rank, company in enumerate(companies, 1):
         company_rows = frame[frame["company"] == company]
         grouped = company_rows.groupby(["code", "name", "unit", "month"], as_index=False).agg(outbound=("outbound", "sum"))
@@ -159,6 +169,9 @@ def _companies_html(rows: list[dict], months: tuple[str, ...], current_month: st
         pivot["_sort"] = pivot[list(months)].sum(axis=1)
         today = company_rows[company_rows["date"] == current_date].groupby("code")["outbound"].sum()
         pivot["今日变化"] = pivot["code"].map(today).fillna(0)
+        for month in (*months, current_month):
+            company_totals[month] += float(pivot[month].sum())
+        today_total += float(pivot["今日变化"].sum())
         pivot = pivot.sort_values(["_sort", current_month, "code"], ascending=[False, False, True])
         rowspan = len(pivot)
         for index, (_, row) in enumerate(pivot.iterrows()):
@@ -170,6 +183,26 @@ def _companies_html(rows: list[dict], months: tuple[str, ...], current_month: st
             cells.append(f"<td class='today-change'>{_delta(row['今日变化'])}</td>")
             cells.append(f"<td class='unit'>{html.escape(_display_unit(row['unit']))}</td>")
             out.append("<tr>" + "".join(cells) + "</tr>")
+    top_three_month_total = sum(company_totals[month] for month in months)
+    all_three_month_total = sum(all_totals[month] for month in months)
+    total_cells = ["<td class='total-label' colspan='2'>前五大公司合计</td>", f"<td class='num'>{_fmt(top_three_month_total)}</td>", "<td></td>"]
+    total_cells.extend(f"<td class='num'>{_fmt(company_totals[month])}</td>" for month in (*months, current_month))
+    total_cells.extend([f"<td class='today-change'>{_delta(today_total)}</td>", "<td class='unit'>kg</td>"])
+    out.append("<tr class='total-row'>" + "".join(total_cells) + "</tr>")
+    all_cells = ["<td class='total-label' colspan='2'>全部领用出库合计</td>", f"<td class='num'>{_fmt(all_three_month_total)}</td>", "<td></td>"]
+    all_cells.extend(f"<td class='num'>{_fmt(all_totals[month])}</td>" for month in (*months, current_month))
+    all_cells.extend([f"<td class='today-change'>{_delta(all_today_total)}</td>", "<td class='unit'>kg</td>"])
+    out.append("<tr class='total-row'>" + "".join(all_cells) + "</tr>")
+    concentration_cells = ["<td class='total-label' colspan='4'>前五大公司领用集中度</td>"]
+    concentration_cells.extend(
+        f"<td class='num'>{(company_totals[month] / all_totals[month] * 100):.1f}%</td>" if all_totals[month] else "<td class='num'>—</td>"
+        for month in (*months, current_month)
+    )
+    concentration_cells.extend([
+        f"<td class='today-change'>{(today_total / all_today_total * 100):.1f}%</td>" if all_today_total else "<td class='today-change'>—</td>",
+        "<td class='unit'>%</td>",
+    ])
+    out.append("<tr class='total-row concentration-row'>" + "".join(concentration_cells) + "</tr>")
     return "".join(out) + "</tbody></table></div>"
 
 
@@ -200,5 +233,5 @@ def build_usage_sections(data_dir: Path, monthly_root: Path | None = None) -> st
             + _rows_html(rows, months, current_month, current_date)
             + f"<p class='usage-note'>统计范围：{months[0]} 至 {current_date}；按近三个月出库总量倒序，今日变化以 +数量表示。数据取自最近三个月月末汇总文件和当前每日库存文件。</p>"
             + "<h2>前五大领用公司及物料明细</h2>"
-            + _companies_html(recognized, months, current_month, current_date)
-            + f"<p class='usage-note'>统计范围：{months[0]} 至 {current_date}；仅统计出入库明细中可识别为“领用出库”的记录，前五家公司按近三个月总量排序，今日变化按当前每日文件计算。</p>")
+            + _companies_html(recognized, rows, months, current_month, current_date)
+            + f"<p class='usage-note'>统计范围：{months[0]} 至 {current_date}；仅统计“领用出库”，前五家公司按近三个月总量排序。集中度 = 前五大公司合计 ÷ 全部领用出库合计；分母包含未备注领用记录。</p>")
