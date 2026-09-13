@@ -58,7 +58,9 @@ if not demand_file:
             Path(demand_file).write_bytes(demand_file_tmp)
             print(f"✅ 已从坚果云读取自动清单: {remote_list}")
         except RuntimeError as exc:
-            print(f"❌ 坚果云自动清单下载失败: {exc}"); sys.exit(1)
+            # 首次上线、月末核验尚未生成清单时，允许沿用旧清单；其他错误也保留明确日志。
+            print(f"⚠️ 坚果云自动清单不可用，暂回退旧清单: {exc}")
+            demand_file = ""
 if not demand_file:
     legacy_file = os.path.join(DATA_DIR, DEMAND_XLSX)
     if os.path.exists(legacy_file):
