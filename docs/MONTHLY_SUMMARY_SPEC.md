@@ -20,7 +20,7 @@ QQ 邮箱目标邮件
 ## 代码与运行边界
 
 - 唯一代码源：`meidi-auto` GitHub `main`。
-- 唯一执行环境：WSL 中的 `meidi-auto/.venv`。
+- 本地开发/排查环境：WSL 中的 `meidi-auto/.venv`；生产日报和月初核验由 GitHub Actions 执行。
 - 邮箱凭据：WSL 本地 `.env` 或 GitHub Actions Secrets，禁止提交。
 - 业务数据：继续保存在 Windows/坚果备份目录，通过 WSL `/mnt/c/...` 访问，禁止上传 GitHub。
 - 原来的 `手动触发下载邮件` 目录只作为迁移对照，验证完成后才删除。
