@@ -14,7 +14,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from .monthly_summary import AggregationResult, month_token, normalize_code
 
 
-AUTO_LIST_HEADERS = ("编号", "外应存(1周)", "家应存(1周)", "月计划(近3月/3)", "备注", "比例", "近3月出库总量", "基准月份")
+AUTO_LIST_HEADERS = ("编号", "外应存(3月周均)", "家应存(3月周均)", "月计划(3月月均)", "备注", "比例", "近3月出库总量", "基准月份")
 
 
 @dataclass(frozen=True)
@@ -91,9 +91,9 @@ def build_auto_list_frame(result: AggregationResult, anchor_month: str) -> tuple
     frame["比例"] = None
     frame["基准月份"] = f"{month_token(source_months[0])}~{month_token(source_months[-1])}"
     frame = frame.rename(columns={
-        "外应存": "外应存(1周)",
-        "家应存": "家应存(1周)",
-        "月计划": "月计划(近3月/3)",
+        "外应存": "外应存(3月周均)",
+        "家应存": "家应存(3月周均)",
+        "月计划": "月计划(3月月均)",
     })
     return frame.loc[:, AUTO_LIST_HEADERS].sort_values("编号").reset_index(drop=True), source_months
 
