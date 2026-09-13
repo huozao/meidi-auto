@@ -132,6 +132,32 @@ def clear_row_fills(sheet, row_idx: int, max_col: int):
     for col_idx in range(1, max_col + 1):
         sheet.cell(row=row_idx, column=col_idx).fill = empty_fill
 
+
+CONTROLLED_COLORS = {
+    COLOR_DEEP_PURPLE, COLOR_DEEP_RED, COLOR_GREEN,
+    COLOR_LIGHT_PURPLE, COLOR_LIGHT_RED,
+}
+
+
+def _is_controlled_fill(cell) -> bool:
+    fill = cell.fill
+    color = fill.fgColor if fill and fill.fill_type == "solid" else None
+    return bool(color and color.type == "rgb" and color.rgb and color.rgb[-6:].upper() in CONTROLLED_COLORS)
+
+
+def clear_previous_alert_fills(sheet, row_idx: int, exclude_cols_letters: set) -> None:
+    """只清除本脚本管理的红/紫/绿告警底色，避免旧告警在数值归零后残留。"""
+    empty_fill = PatternFill()
+    controlled_columns = {column_index_from_string(COL_N)}
+    for start, end in ROW_FILL_RANGES:
+        controlled_columns.update(iter_col_indices(start, end))
+    for col_idx in controlled_columns:
+        if get_column_letter(col_idx) in exclude_cols_letters and col_idx != column_index_from_string(COL_N):
+            continue
+        cell = sheet.cell(row=row_idx, column=col_idx)
+        if _is_controlled_fill(cell):
+            cell.fill = empty_fill
+
 def apply_light_fill(sheet, row_idx: int, light_fill: PatternFill, exclude_cols_letters: set):
     """
     给 ROW_FILL_RANGES 指定范围铺淡色：
@@ -173,6 +199,10 @@ def process_inventory_data(sheet):
     for row in sheet.iter_rows(min_row=2, max_col=max_col, values_only=False):
         row_idx = row[0].row
 
+        # B/C 同时为空的是表尾合计行或空白行，不参与库存告警。
+        if row_idx >= 5 and not row[1].value and not row[2].value:
+            continue
+
         # 1) 跳过整行
         skip_val = normalize_code(row[idx_skip].value, SKIP_CODE_DIGITS) if idx_skip < len(row) else ""
         if skip_val in SKIP_CODES:
@@ -182,11 +212,13 @@ def process_inventory_data(sheet):
                 print(f"行 {row_idx} → 跳过着色（{SKIP_COL}列={skip_val}）")
             continue
 
+        clear_previous_alert_fills(sheet, row_idx, exclude_light)
+
         # 2) 取 m / n
         m = safe_float(row[idx_m].value) if idx_m < len(row) else 0.0
         n = safe_float(row[idx_n].value) if idx_n < len(row) else 0.0
 
-        # 只处理 n>0
+        # n<=0 时已清除了上一次运行留下的告警色，不再新增颜色。
         if n <= 0:
             continue
 

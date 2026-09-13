@@ -13,6 +13,7 @@
   - `pipeline/flow_map.py`：业务阶段与常见需求修改导航。
 - `script/`：业务脚本（下载邮件、合并 Excel、计算与着色、生成 HTML、发送邮件）。
 - `.github/workflows/run-daily.yml`：标准化 CI 运行工作流（由 `gmail-watcher` 触发，也支持手动运行）。
+- `.github/workflows/monthly-closeout.yml`：每月 1 日北京时间 00:02 核验月末文件并生成报告。
 - `requirements.txt`：Python 依赖。
 - `docs/PIPELINE_FLOW.md`：主流程一页图（Mermaid）+ 阅读顺序。
 - `docs/AI_FRIENDLY_REDESIGN.md`：AI 友好型重构说明（主线、边界、改动导航）。
@@ -176,6 +177,17 @@ python main.py --data-dir data-docker --stop-on-error --clean-after-run --report
 
 > 若 `IMAP_SERVER` Secret 留空，workflow 会自动回退到 `imap.qq.com`。
 
+### 每日附件归档与月初核验
+
+每日流程在发送邮件后执行 `052 Archive daily attachment.py`，将最终 Excel、HTML 和图片复制到 `YYYYMM` 子目录。
+本地可设置 `DAILY_ATTACHMENT_ARCHIVE_DIR` 指向 Windows 坚果云同步目录；GitHub Actions 则设置
+`NUTSTORE_WEBDAV_URL`、`NUTSTORE_WEBDAV_USER`、`NUTSTORE_WEBDAV_APP_PASSWORD`、
+`NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR` 和 `NUTSTORE_REMOTE_MONTHLY_ARCHIVE_DIR`，直接写入同一坚果云目录。
+
+月初工作流下载上一月的月末文件和每日归档，按工作簿单元格内容计算语义指纹（忽略 Excel 样式及元数据）。
+一致时才写入自动月末归档并生成报告；不一致时不覆盖月末文件，只发送人工核验邮件。
+报告中的“公司月度环比”按实际日历月列出本月、上月、变化量和变化率；“公司领用趋势”“公司年度趋势”末行是各公司的累计合计。
+
 ### GitHub Actions 跑完后，`data/` 会不会留痕？
 
 默认不会长期留痕在仓库里：
@@ -272,6 +284,35 @@ python main.py --dry-run
 - `EMAIL_PASSWORD_QQ`（兼容历史变量 `EMAIL_PASSWOR_QQ`）
 - `RECIPIENT_EMAILS`（必需，例：`a@example.com,b@example.com`）
 - `IMAP_SERVER`（可选，默认 `imap.qq.com`）
+
+## 月末邮件与物料汇总
+
+月度汇总已迁移到 WSL 中的 `tools/monthly_summary.py`，设计和数据边界见
+[`docs/MONTHLY_SUMMARY_SPEC.md`](docs/MONTHLY_SUMMARY_SPEC.md)。它不加入每日
+`main.py` 生产步骤，默认按指定月份选择最后一天 24:00 前最新的
+“物料情况和Excel文件”邮件，保存月末快照，再扫描历史月末文件并输出物料分析 Excel。
+工作簿是否为合格月末表，以 `库存表` 表头上方是否包含目标月份最后一天（如
+`2026年08月31日`）为主判据；当天没有出入库流水只作辅助提示。
+报告还会根据 `出入库明细表` 的“备注”统一公司名称，输出公司月度/年度领用物料、
+借用归还、退货换货等业务明细，并在 `图表` 工作表中生成公司和业务类型趋势图。
+备注为空时，`MA1111`按“重庆工厂”统计，`MA1141`和`MS1121`按子库编号作为公司名统计。
+
+本地配置放在仓库根目录 `.env`（不提交），至少包括 `EMAIL_ADDRESS_QQ`、
+`EMAIL_PASSWORD_QQ`、`MONTHLY_ARCHIVE_DIR`。常用命令：
+
+```bash
+# 只用现有月末文件生成报告，不访问邮箱
+python tools/monthly_summary.py --aggregate-only
+
+# 下载指定月份月末邮件、归档并生成全量报告
+python tools/monthly_summary.py --month 2026-08
+
+# 只检查月份、字段和数据质量，不写入归档或报告
+python tools/monthly_summary.py --aggregate-only --dry-run
+
+# 下载最新目标邮件供人工查看
+python tools/download_latest_mail.py
+```
 
 ## 历史工具的去向与替代方案
 

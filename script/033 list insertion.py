@@ -1,7 +1,7 @@
 # ================================================
 # STEP CARD
-# 功能: 按需求表回填 K/N/P/T 列并统一样式。
-# 输入: script/data/list.xlsx, 总库存*.xlsx
+# 功能: 按自动清单回填 K/N/P/T 列并统一样式。
+# 输入: AUTO_LIST_FILE（或兼容 script/data/list.xlsx）, 总库存*.xlsx
 # 输出: 更新后的总库存*.xlsx
 # 上游: 032 Warehousing at out.py
 # 下游: 041/042/050
@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from pipeline.io_utils import resolve_data_dir, find_first_excel
+from pipeline.archive import WebDavStore
 
 # =======================
 # 配置区（按需改这里）
@@ -26,7 +27,6 @@ from pipeline.io_utils import resolve_data_dir, find_first_excel
 DEFAULT_INV_DIR = os.path.join(os.getcwd(), "data")  # “总库存*.xlsx”所在目录
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DEMAND_XLSX = "list.xlsx"
-DEMAND_SHEET = "2503"
 INV_SHEET = "库存表"
 
 START_ROW = 5                 # 数据起始行（库存表）
@@ -44,7 +44,27 @@ inv_dir = str(resolve_data_dir(sys.argv[1] if len(sys.argv) >= 2 else None, "dat
 if not os.path.exists(inv_dir):
     print(f"❌ 库存目录不存在: {inv_dir}"); sys.exit(1)
 
-demand_file = os.path.join(DATA_DIR, DEMAND_XLSX)
+auto_list_file = os.getenv("AUTO_LIST_FILE", "").strip()
+demand_file = auto_list_file if auto_list_file and os.path.exists(auto_list_file) else ""
+if not demand_file:
+    dav_base = os.getenv("NUTSTORE_WEBDAV_URL", "").strip()
+    dav_user = os.getenv("NUTSTORE_WEBDAV_USER", "").strip()
+    dav_password = os.getenv("NUTSTORE_WEBDAV_APP_PASSWORD", "").strip()
+    remote_list = os.getenv("NUTSTORE_REMOTE_AUTO_LIST_FILE", "").strip()
+    if dav_base and dav_user and dav_password and remote_list:
+        demand_file = os.path.join(inv_dir, ".auto-list.xlsx")
+        try:
+            demand_file_tmp = WebDavStore(dav_base, dav_user, dav_password).get(remote_list)
+            Path(demand_file).write_bytes(demand_file_tmp)
+            print(f"✅ 已从坚果云读取自动清单: {remote_list}")
+        except RuntimeError as exc:
+            print(f"❌ 坚果云自动清单下载失败: {exc}"); sys.exit(1)
+if not demand_file:
+    legacy_file = os.path.join(DATA_DIR, DEMAND_XLSX)
+    if os.path.exists(legacy_file):
+        if auto_list_file:
+            print(f"⚠️ 自动清单尚未生成，暂回退旧清单: {legacy_file}")
+        demand_file = legacy_file
 if not os.path.exists(demand_file):
     print(f"❌ 需求文件不存在: {demand_file}"); sys.exit(1)
 
@@ -56,14 +76,20 @@ if not inventory_file:
 # 打开工作簿
 # =======================
 wb_demand = openpyxl.load_workbook(demand_file, data_only=True)
-if DEMAND_SHEET not in wb_demand.sheetnames:
-    print(f"❌ 需求缺少工作表: {DEMAND_SHEET}"); sys.exit(1)
-sheet_demand = wb_demand[DEMAND_SHEET]
+configured_sheet = os.getenv("AUTO_LIST_SHEET", "").strip()
+if configured_sheet and configured_sheet not in wb_demand.sheetnames:
+    print(f"❌ 自动清单缺少工作表: {configured_sheet}"); sys.exit(1)
+sheet_demand = wb_demand[configured_sheet] if configured_sheet else wb_demand.active
+print(f"✅ 使用自动清单: {demand_file} | 工作表: {sheet_demand.title}")
 
 wb_inventory = openpyxl.load_workbook(inventory_file)
 if INV_SHEET not in wb_inventory.sheetnames:
     print(f"❌ 库存缺少工作表: {INV_SHEET}"); sys.exit(1)
 sheet_inventory = wb_inventory[INV_SHEET]
+# 标注自动清单的数值口径；041 会按“字段名或字段名前缀”兼容读取。
+sheet_inventory.cell(row=4, column=11, value="外应存(1周)")
+sheet_inventory.cell(row=4, column=14, value="家应存(1周)")
+sheet_inventory.cell(row=4, column=16, value="月计划(近3月/3)")
 
 # =======================
 # 构建映射：编码 → (B,C,D,E)

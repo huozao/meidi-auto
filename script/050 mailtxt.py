@@ -10,6 +10,7 @@
 import os
 import sys
 import openpyxl
+from dotenv import load_dotenv
 from datetime import datetime
 import re
 from pathlib import Path
@@ -19,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from pipeline.io_utils import ensure_existing_dir, find_required_excel, resolve_data_dir
+from pipeline.usage_trends import build_usage_sections
 
 
 # ================================
@@ -177,10 +179,11 @@ def prepare_summary_text(sheet, last_empty_row):
     plan_gap_output   = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=17).value)
     monthly_sent      = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=18).value)
     monthly_received  = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=19).value)
+    home_stock_total  = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=13).value)
     monthly_remaining = monthly_plan - monthly_sent if monthly_plan and monthly_sent else 0
 
-    print(f"📊 库存总量: {stock_total}, 月计划: {monthly_plan}, 缺口排产: {plan_gap_output}, 出库: {monthly_sent}, 入库: {monthly_received}")
-    return stock_total, monthly_plan, plan_gap_output, monthly_sent, monthly_received, monthly_remaining
+    print(f"📊 外仓库存: {stock_total}, 家里库存: {home_stock_total}, 月计划: {monthly_plan}, 缺口排产: {plan_gap_output}, 出库: {monthly_sent}, 入库: {monthly_received}")
+    return stock_total, monthly_plan, plan_gap_output, monthly_sent, monthly_received, monthly_remaining, home_stock_total
 
 
 # ================================
@@ -188,17 +191,43 @@ def prepare_summary_text(sheet, last_empty_row):
 # ================================
 def construct_html_content(sheet, colored_rows, date, date2,
                            stock_total, monthly_plan, plan_gap_output,
-                           monthly_sent, monthly_received, monthly_remaining):
+                           monthly_sent, monthly_received, monthly_remaining, home_stock_total, usage_sections=""):
     html = """
     <html>
     <head>
         <meta charset="UTF-8">
         <style>
-            table { border-collapse: collapse; width: auto; margin-top: 10px; }
-            th, td { border: 1px solid #999; padding: 6px 10px; }
-            th { background-color: #f2f2f2; text-align: left; }
-            td.right { text-align: right; }
+            body { margin: 0; padding: 0; background: #f3f6fa; color: #243447; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; line-height: 1.5; }
+            body > * { box-sizing: border-box; }
+            h1 { margin: 0; padding: 18px 22px 4px; color: #173b63; font-size: 22px; letter-spacing: .2px; }
+            h2 { margin: 28px 0 8px; padding: 10px 14px; border-left: 5px solid #3b82c4; background: #e8f1fb; color: #173b63; font-size: 18px; }
+            h5 { margin: 6px 22px 10px; color: #526579; font-size: 13px; font-weight: 500; }
+            p { margin: 8px 22px; color: #5a6b7d; }
+            table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 560px; margin: 0; background: #fff; }
+            th, td { border-right: 1px solid #d9e2ec; border-bottom: 1px solid #e4eaf1; padding: 8px 10px; white-space: nowrap; }
+            th { background: #eaf2fb; color: #173b63; text-align: left; font-weight: 650; }
+            tbody tr:nth-child(even) { background: #f8fbff; }
+            tbody tr:hover { background: #fff5d6; }
+            td.right, td.num { text-align: right; font-variant-numeric: tabular-nums; }
             td.left { text-align: left; }
+            td.code, td.unit, td.rank { text-align: center; }
+            td.today-change { color: #16804b; font-weight: 700; text-align: right; }
+            .table-wrap { overflow-x: auto; margin: 10px 22px 24px; border: 1px solid #d7e1ec; border-radius: 10px; box-shadow: 0 2px 8px rgba(31, 58, 95, .06); }
+            .table-wrap table tr:first-child th:first-child { border-top-left-radius: 9px; }
+            .table-wrap table tr:first-child th:last-child { border-top-right-radius: 9px; }
+            .summary-table { min-width: 420px; }
+            .trend { min-width: 760px; table-layout: fixed; }
+            .company { min-width: 760px; table-layout: fixed; }
+            .trend .code-col, .company .code-col { width: 66px; }
+            .trend .month-col, .company .month-col { width: 86px; }
+            .trend .delta-col, .company .delta-col { width: 88px; }
+            .trend .unit-col, .company .unit-col { width: 58px; }
+            .company .rank-col { width: 48px; }
+            .company .company-col { width: 96px; }
+            .company .total-col { width: 96px; }
+            .company-name { white-space: normal; word-break: break-all; }
+            .warn { color: #a61c00; background: #fff1f0; border: 1px solid #f3b5ae; border-radius: 6px; padding: 8px 12px; }
+            @media (max-width: 700px) { h1 { font-size: 19px; } .table-wrap { margin-left: 10px; margin-right: 10px; } p, h5 { margin-left: 10px; margin-right: 10px; } }
         </style>
     </head>
     <body>
@@ -212,7 +241,7 @@ def construct_html_content(sheet, colored_rows, date, date2,
     """
 
     html += """
-    <table>
+    <div class="table-wrap"><table class="summary-table">
         <tr>
             <th>编号</th>
             <th>库存</th>
@@ -239,30 +268,26 @@ def construct_html_content(sheet, colored_rows, date, date2,
         </tr>
         """
 
-    html += "</table>"
+    html += "</table></div>"
 
     html += """
     <h5>汇总信息</h5>
-    <table>
-        <tr><th>项目</th><th>数值</th></tr>
+    <div class="table-wrap"><table class="summary-table">
+        <tr><th>外仓项目</th><th>数值</th><th>计划/家库存项目</th><th>数值</th></tr>
     """
 
-    def row(label, value):
-        return f"""
-        <tr>
-            <td class="left">{label}</td>
-            <td class="right">{value:,.1f}</td>
-        </tr>
-        """
+    def cell(label, value):
+        return f'<td class="left">{label}</td><td class="right">{value:,.1f}</td>'
 
-    html += row("外仓库存总量", stock_total)
-    html += row("月计划", monthly_plan)
-    html += row("月计划缺口排产", plan_gap_output)
-    html += row("外仓出库总量", monthly_sent)
-    html += row("外仓入库总量", monthly_received)
-    html += row("月预估还有要发货", monthly_remaining)
+    html += "<tr>" + cell("外仓库存总量", stock_total) + cell("月计划", monthly_plan) + "</tr>"
+    html += "<tr>" + cell("外仓出库总量", monthly_sent) + cell("月计划缺口排产", plan_gap_output) + "</tr>"
+    html += "<tr>" + cell("外仓入库总量", monthly_received) + cell("月预估还有要发货", monthly_remaining) + "</tr>"
+    html += "<tr>" + cell("家里库存总量", home_stock_total) + '<td class="left"></td><td class="right"></td></tr>'
 
-    html += "</table>\n</body></html>"
+    html += "</table></div>"
+    if usage_sections:
+        html += usage_sections
+    html += "\n</body></html>"
     return html
 
 
@@ -282,6 +307,7 @@ def save_output_to_file(html_content, output_dir):
 def main(argv: list[str] | None = None) -> int:
     if argv is not None:
         sys.argv = argv
+    load_dotenv(REPO_ROOT / ".env")
     inventory_folder = get_inventory_folder()
     inventory_file = find_excel_file(inventory_folder)
     sheet = load_worksheet(inventory_file)
@@ -291,12 +317,17 @@ def main(argv: list[str] | None = None) -> int:
     last_empty_row = find_last_empty_row(sheet)
     print(f"⚡ 发现 B 列第一个空单元格所在行: {last_empty_row}")
 
-    stock_total, monthly_plan, plan_gap_output, monthly_sent, monthly_received, monthly_remaining = prepare_summary_text(sheet, last_empty_row)
+    stock_total, monthly_plan, plan_gap_output, monthly_sent, monthly_received, monthly_remaining, home_stock_total = prepare_summary_text(sheet, last_empty_row)
+    monthly_root_value = os.getenv("MONTHLY_ARCHIVE_DIR", "").strip()
+    usage_sections = build_usage_sections(
+        Path(inventory_folder),
+        Path(monthly_root_value).expanduser() if monthly_root_value else None,
+    )
 
     html_content = construct_html_content(
         sheet, colored_rows, date, date2,
         stock_total, monthly_plan, plan_gap_output,
-        monthly_sent, monthly_received, monthly_remaining
+        monthly_sent, monthly_received, monthly_remaining, home_stock_total, usage_sections
     )
 
     print("\n📋 HTML 已生成，预览内容省略…")

@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from pipeline.models import PipelineStep
 from pipeline.steps import CLEANUP_STEP, PRODUCTION_STEPS
 from pipeline.validators import missing_step_files, validate_step_inputs, validate_step_output
@@ -30,7 +32,7 @@ REQUIRED_ENV_KEYS: tuple[str, ...] = (
 RETRYABLE_STEPS: tuple[str, ...] = ("020 Email download.py",)
 DEFAULT_RETRY_COUNT = 2
 DEFAULT_RETRY_BACKOFF_SECONDS = 2
-DEFAULT_IN_PROCESS_STEPS: tuple[str, ...] = ("050 image.py", "050 mailtxt.py", "051 Send an email.py")
+DEFAULT_IN_PROCESS_STEPS: tuple[str, ...] = ("050 image.py", "050 mailtxt.py", "051 Send an email.py", "052 Archive daily attachment.py")
 
 
 def parse_args() -> argparse.Namespace:
@@ -280,6 +282,8 @@ def write_report(report_file: str, payload: dict, root: Path) -> None:
 
 
 def main() -> int:
+    # 本地 WSL 运行读取仓库根目录 .env；GitHub Actions 仍由环境变量注入。
+    load_dotenv(Path(__file__).resolve().with_name(".env"))
     args = parse_args()
     in_process_steps = frozenset([item.strip() for item in args.in_process_steps.split(",") if item.strip()])
 

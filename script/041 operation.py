@@ -67,11 +67,19 @@ try:
             if key not in headers:
                 headers[key] = cell.column
 
+    def header_column(name):
+        if name in headers:
+            return headers[name]
+        for label, column in headers.items():
+            if label.startswith(f"{name}(") or label.startswith(f"{name}（"):
+                return column
+        return None
+
     required_columns = [
         "外应存", "家应存", "家里库存", "库存",
         "外仓出库总量", "最小发货", "排产", "月计划", "月计划缺口"
     ]
-    missing_columns = [col for col in required_columns if col not in headers]
+    missing_columns = [col for col in required_columns if header_column(col) is None]
     if missing_columns:
         print(f"❌ 缺少必要列: {missing_columns}")
         sys.exit(1)
@@ -79,15 +87,15 @@ try:
     def col_letter(col_num):
         return openpyxl.utils.get_column_letter(col_num)
 
-    col_external = headers["外应存"]
-    col_home = headers["家应存"]
-    col_stock = headers["家里库存"]
-    col_total_stock = headers["库存"]
-    col_external_ship = headers["外仓出库总量"]
-    col_min_ship = headers["最小发货"]
-    col_production = headers["排产"]
-    col_plan = headers["月计划"]
-    col_gap = headers["月计划缺口"]
+    col_external = header_column("外应存")
+    col_home = header_column("家应存")
+    col_stock = header_column("家里库存")
+    col_total_stock = header_column("库存")
+    col_external_ship = header_column("外仓出库总量")
+    col_min_ship = header_column("最小发货")
+    col_production = header_column("排产")
+    col_plan = header_column("月计划")
+    col_gap = header_column("月计划缺口")
     col_ref = 10  # J列
 
     print("✅ 表头索引解析完成")

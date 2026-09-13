@@ -66,6 +66,11 @@ NOTIFICATION_STEPS: tuple[PipelineStep, ...] = (
         "051 Send an email.py",
         input_patterns=("output.html", "*美的*.png", "总库存*.xlsx"),
     ),
+    PipelineStep(
+        "052 Archive daily attachment.py",
+        input_patterns=("output.html", "总库存*.xlsx"),
+        required=False,
+    ),
 )
 
 
