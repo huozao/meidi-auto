@@ -191,7 +191,8 @@ def prepare_summary_text(sheet, last_empty_row):
 # ================================
 def construct_html_content(sheet, colored_rows, date, date2,
                            stock_total, monthly_plan, plan_gap_output,
-                           monthly_sent, monthly_received, monthly_remaining, home_stock_total, usage_sections=""):
+                           monthly_sent, monthly_received, monthly_remaining, home_stock_total,
+                           usage_sections="", auto_list_warning=""):
     html = """
     <html>
     <head>
@@ -227,6 +228,7 @@ def construct_html_content(sheet, colored_rows, date, date2,
             .company .total-col { width: 96px; }
             .company-name { white-space: normal; word-break: break-all; }
             .warn { color: #a61c00; background: #fff1f0; border: 1px solid #f3b5ae; border-radius: 6px; padding: 8px 12px; }
+            .usage-note { margin: -8px 22px 18px; padding: 8px 12px; color: #53677c; font-size: 12px; background: #eef4fa; border-left: 3px solid #9bb9d6; border-radius: 4px; }
             @media (max-width: 700px) { h1 { font-size: 19px; } .table-wrap { margin-left: 10px; margin-right: 10px; } p, h5 { margin-left: 10px; margin-right: 10px; } }
         </style>
     </head>
@@ -239,6 +241,8 @@ def construct_html_content(sheet, colored_rows, date, date2,
     <h1>{date2} 家里库存数据</h1>
     <h5>“外仓库存＜50%外仓应存数量”的物料有 <strong>{len(colored_rows)}</strong> 款</h5>
     """
+    if auto_list_warning:
+        html += f'<p class="warn">{auto_list_warning}</p>'
 
     html += """
     <div class="table-wrap"><table class="summary-table">
@@ -323,11 +327,14 @@ def main(argv: list[str] | None = None) -> int:
         Path(inventory_folder),
         Path(monthly_root_value).expanduser() if monthly_root_value else None,
     )
+    auto_list_warning = ""
+    if (Path(inventory_folder) / ".auto-list-unavailable").exists():
+        auto_list_warning = "未自动获取到最新自动清单，无法计算外应存、家应存和月计划；本邮件仅展示原始库存及趋势数据。"
 
     html_content = construct_html_content(
         sheet, colored_rows, date, date2,
         stock_total, monthly_plan, plan_gap_output,
-        monthly_sent, monthly_received, monthly_remaining, home_stock_total, usage_sections
+        monthly_sent, monthly_received, monthly_remaining, home_stock_total, usage_sections, auto_list_warning
     )
 
     print("\n📋 HTML 已生成，预览内容省略…")

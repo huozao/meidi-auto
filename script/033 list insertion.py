@@ -46,6 +46,7 @@ if not os.path.exists(inv_dir):
 
 auto_list_file = os.getenv("AUTO_LIST_FILE", "").strip()
 demand_file = auto_list_file if auto_list_file and os.path.exists(auto_list_file) else ""
+auto_list_unavailable = False
 if not demand_file:
     dav_base = os.getenv("NUTSTORE_WEBDAV_URL", "").strip()
     dav_user = os.getenv("NUTSTORE_WEBDAV_USER", "").strip()
@@ -58,17 +59,14 @@ if not demand_file:
             Path(demand_file).write_bytes(demand_file_tmp)
             print(f"✅ 已从坚果云读取自动清单: {remote_list}")
         except RuntimeError as exc:
-            # 首次上线、月末核验尚未生成清单时，允许沿用旧清单；其他错误也保留明确日志。
-            print(f"⚠️ 坚果云自动清单不可用，暂回退旧清单: {exc}")
+            print(f"❌ 坚果云自动清单不可用: {exc}")
             demand_file = ""
 if not demand_file:
-    legacy_file = os.path.join(DATA_DIR, DEMAND_XLSX)
-    if os.path.exists(legacy_file):
-        if auto_list_file:
-            print(f"⚠️ 自动清单尚未生成，暂回退旧清单: {legacy_file}")
-        demand_file = legacy_file
-if not os.path.exists(demand_file):
-    print(f"❌ 需求文件不存在: {demand_file}"); sys.exit(1)
+    auto_list_unavailable = True
+    print("❌ 未自动获取到最新清单，无法计算清单相关数据；将继续生成邮件并明确提示。")
+    Path(inv_dir, ".auto-list-unavailable").write_text("未自动获取到最新清单，无法计算。\n", encoding="utf-8")
+else:
+    Path(inv_dir, ".auto-list-unavailable").unlink(missing_ok=True)
 
 inventory_file = find_first_excel(Path(inv_dir), "*总库存*.xlsx")
 if not inventory_file:
@@ -77,12 +75,14 @@ if not inventory_file:
 # =======================
 # 打开工作簿
 # =======================
-wb_demand = openpyxl.load_workbook(demand_file, data_only=True)
-configured_sheet = os.getenv("AUTO_LIST_SHEET", "").strip()
-if configured_sheet and configured_sheet not in wb_demand.sheetnames:
-    print(f"❌ 自动清单缺少工作表: {configured_sheet}"); sys.exit(1)
-sheet_demand = wb_demand[configured_sheet] if configured_sheet else wb_demand.active
-print(f"✅ 使用自动清单: {demand_file} | 工作表: {sheet_demand.title}")
+sheet_demand = None
+if not auto_list_unavailable:
+    wb_demand = openpyxl.load_workbook(demand_file, data_only=True)
+    configured_sheet = os.getenv("AUTO_LIST_SHEET", "").strip()
+    if configured_sheet and configured_sheet not in wb_demand.sheetnames:
+        print(f"❌ 自动清单缺少工作表: {configured_sheet}"); sys.exit(1)
+    sheet_demand = wb_demand[configured_sheet] if configured_sheet else wb_demand.active
+    print(f"✅ 使用自动清单: {demand_file} | 工作表: {sheet_demand.title}")
 
 wb_inventory = openpyxl.load_workbook(inventory_file)
 if INV_SHEET not in wb_inventory.sheetnames:
@@ -97,11 +97,12 @@ sheet_inventory.cell(row=4, column=16, value="月计划(近3月/3)")
 # 构建映射：编码 → (B,C,D,E)
 # =======================
 demand_data = {}
-for a, b, c, d, e in sheet_demand.iter_rows(min_row=2, max_col=5, values_only=True):
-    if a is None: continue
-    key = str(a).strip()
-    if not key: continue
-    demand_data[key] = (b, c, d, e)
+if sheet_demand is not None:
+    for a, b, c, d, e in sheet_demand.iter_rows(min_row=2, max_col=5, values_only=True):
+        if a is None: continue
+        key = str(a).strip()
+        if not key: continue
+        demand_data[key] = (b, c, d, e)
 
 # =======================
 # 写入：K/N/P/T
