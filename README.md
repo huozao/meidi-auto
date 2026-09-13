@@ -17,6 +17,7 @@
 - `requirements.txt`：Python 依赖。
 - `docs/PIPELINE_FLOW.md`：主流程一页图（Mermaid）+ 阅读顺序。
 - `docs/AI_FRIENDLY_REDESIGN.md`：AI 友好型重构说明（主线、边界、改动导航）。
+- `docs/CURRENT_HANDOFF.md`：当前已上线状态、已确认业务口径、运行验证方法和待跟进事项；新会话先读此文件。
 
 ## 运行方式
 
