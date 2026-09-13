@@ -77,6 +77,8 @@ jobs:
           NUTSTORE_WEBDAV_USER: ${{ secrets.NUTSTORE_WEBDAV_USER }}
           NUTSTORE_WEBDAV_APP_PASSWORD: ${{ secrets.NUTSTORE_WEBDAV_APP_PASSWORD }}
           NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR: ${{ secrets.NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR }}
+          NUTSTORE_REMOTE_AUTO_LIST_FILE: ${{ secrets.NUTSTORE_REMOTE_AUTO_LIST_FILE }}
+          NUTSTORE_REMOTE_MONTHLY_ARCHIVE_DIR: ${{ secrets.NUTSTORE_REMOTE_MONTHLY_ARCHIVE_DIR }}
         run: python main.py --data-dir data --stop-on-error --report-file data/run-report.json
 
       - name: Skip run when IMAP unreachable

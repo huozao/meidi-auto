@@ -23,6 +23,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from pipeline.archive import WebDavStore  # noqa: E402
+from pipeline.auto_list import generate_auto_list  # noqa: E402
 from pipeline.monthly_summary import (  # noqa: E402
     TZ_SHANGHAI,
     MonthlySource,
@@ -151,6 +152,12 @@ def main() -> int:
             store = WebDavStore(dav_base, dav_user, dav_password) if dav_base and dav_user and dav_password else None
             if store:
                 monthly_root, auto_dir, report_dir = _download_remote_monthly(store, dav_monthly_root, temp_root)
+                list_path = temp_root / "auto-list.xlsx"
+                remote_list_path = os.getenv("NUTSTORE_REMOTE_AUTO_LIST_FILE", f"{dav_monthly_root}/自动预警清单/list.xlsx").strip()
+                try:
+                    list_path.write_bytes(store.get(remote_list_path))
+                except RuntimeError:
+                    print("ℹ️ 坚果云尚无上一版自动清单，将按历史月末数据首次生成。")
                 daily_root = temp_root / "RE"
                 daily_folder = month.replace("-", "")
                 daily_dir = daily_root / daily_folder
@@ -163,6 +170,7 @@ def main() -> int:
                 auto_dir = Path(os.getenv("MONTHLY_AUTO_ARCHIVE_DIR", monthly_root / "自动月末归档")).expanduser()
                 report_dir = Path(os.getenv("MONTHLY_REPORT_DIR", monthly_root / "分析结果")).expanduser()
                 daily_root = Path(local_daily_root).expanduser()
+                list_path = Path(os.getenv("AUTO_LIST_FILE", monthly_root / "自动预警清单" / "list.xlsx")).expanduser()
 
             daily_path = _find_daily_file(daily_root, month)
             candidate = fetch_latest_target_attachment(
@@ -194,6 +202,12 @@ def main() -> int:
             result = aggregate_sources(source_list)
             output = report_dir / f"月度物料分析_{month_token(source_list[0].month)}-{month_token(source_list[-1].month)}_{datetime.now(TZ_SHANGHAI).strftime('%Y%m%d_%H%M%S')}.xlsx"
             write_report(build_report_frames(result), output)
+            remarks_source = list_path if list_path.exists() else REPO_ROOT / "script" / "data" / "list.xlsx"
+            auto_list = generate_auto_list(result, month, list_path, remarks_source=remarks_source)
+            # 当前清单固定覆盖，历史清单按月份留存；本地和 WebDAV 两种运行模式都保留。
+            local_history_path = monthly_root / "自动清单历史" / f"{month_token(month)}.xlsx"
+            local_history_path.parent.mkdir(parents=True, exist_ok=True)
+            local_history_path.write_bytes(auto_list.path.read_bytes())
             raw_candidates = sorted((monthly_root / "原始月末快照").glob(f"{month_token(month)}_*.xlsx"))
             raw_path = raw_candidates[-1] if raw_candidates else saved
             append_manifest_record(manifest_path=monthly_root / "原始月末快照" / "manifest.jsonl", candidate=candidate, month=month, raw_path=raw_path, canonical_path=saved, quality=read_month_workbook(MonthlySource(month, saved, "automatic")).quality)
@@ -201,9 +215,13 @@ def main() -> int:
                 store.put(f"{dav_monthly_root}/自动月末归档/{saved.name}", saved.read_bytes())
                 store.put(f"{dav_monthly_root}/原始月末快照/{raw_path.name}", raw_path.read_bytes())
                 store.put(f"{dav_monthly_root}/原始月末快照/manifest.jsonl", (monthly_root / "原始月末快照" / "manifest.jsonl").read_bytes())
+                store.put(remote_list_path, auto_list.path.read_bytes())
+                store.put(f"{dav_monthly_root}/自动清单历史/{month_token(month)}.xlsx", auto_list.path.read_bytes())
                 store.put(f"{dav_monthly_root}/分析结果/{output.name}", output.read_bytes())
+                print(f"✅ 自动清单: {auto_list.path} ({auto_list.material_count} 种物料)")
                 print(f"✅ 报告已回写坚果云: {dav_monthly_root}/分析结果/{output.name}")
             else:
+                print(f"✅ 自动清单: {auto_list.path} ({auto_list.material_count} 种物料)")
                 print(f"✅ 汇总报告: {output}")
             return 0
     except Exception as exc:

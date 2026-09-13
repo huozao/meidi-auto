@@ -363,6 +363,16 @@ def _find_header(ws, required: set[str]) -> tuple[int, dict[str, int]]:
     raise ValueError(f"工作表 {ws.title} 未找到所需表头")
 
 
+def _header_column(headers: dict[str, int], name: str) -> int | None:
+    """兼容“外应存(1周)”等带口径说明的列标题。"""
+    if name in headers:
+        return headers[name]
+    for label, column in headers.items():
+        if label.startswith(f"{name}(") or label.startswith(f"{name}（"):
+            return column
+    return None
+
+
 def _read_detail_quality(wb: openpyxl.Workbook, month: str) -> dict:
     quality = {
         "detail_sheet": "出入库明细表" in wb.sheetnames,
@@ -451,9 +461,9 @@ def read_month_workbook(source: MonthlySource) -> WorkbookReadResult:
             "inbound": headers["外仓入库总量"],
             "outbound": headers["外仓出库总量"],
             "stock": headers["库存"],
-            "qualified_stock": headers.get("合格仓库存"),
-            "external_required": headers.get("外应存"),
-            "monthly_plan": headers.get("月计划"),
+            "qualified_stock": _header_column(headers, "合格仓库存"),
+            "external_required": _header_column(headers, "外应存"),
+            "monthly_plan": _header_column(headers, "月计划"),
         }
         rows: OrderedDict[str, dict] = OrderedDict()
         duplicate_rows = 0
@@ -500,6 +510,15 @@ def read_month_workbook(source: MonthlySource) -> WorkbookReadResult:
             quality["error"] = quality["inventory_header_warning"]
         quality["movement_row_count"] = len(movement_records)
         return WorkbookReadResult(source.month, source.path, list(rows.values()), quality, movement_records)
+    finally:
+        wb.close()
+
+
+def read_movement_workbook(path: Path, month: str) -> list[dict]:
+    """读取任意每日/月份工作簿的出入库明细，不要求它是月末库存快照。"""
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        return _read_movement_rows(wb, month)
     finally:
         wb.close()
 
