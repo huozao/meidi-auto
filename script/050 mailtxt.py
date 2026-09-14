@@ -137,7 +137,13 @@ def get_dates(sheet):
 
 def _compact_date(value):
     """日报仅展示日期，不展示具体时分秒。"""
-    return value[:10] if isinstance(value, str) and len(value) >= 10 else value
+    if not isinstance(value, str):
+        return value
+    match = re.search(r"(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})", value.strip())
+    if match:
+        year, month, day = match.groups()
+        return f"{year}-{int(month):02d}-{int(day):02d}"
+    return value[:10] if len(value) >= 10 else value
 
 
 # ================================
@@ -232,12 +238,13 @@ def construct_html_content(sheet, colored_rows, date, date2,
             .company { min-width: 760px; table-layout: fixed; }
             .trend .code-col, .company .code-col { width: 66px; }
             .trend .month-col, .company .month-col { width: 86px; }
-            .trend .delta-col, .company .delta-col { width: 88px; }
             .trend .unit-col, .company .unit-col { width: 58px; }
             .company .rank-col { width: 48px; }
             .company .company-col { width: 96px; }
             .company .total-col { width: 96px; }
             .company-name { white-space: normal; word-break: break-all; }
+            td.current-month { background: #f2f8ff; }
+            .today-inline { margin-top: 2px; color: #16804b; font-size: 11px; font-weight: 700; line-height: 1.2; }
             .total-label { text-align: left; }
             .warn { color: #a61c00; background: #fff1f0; border: 1px solid #f3b5ae; border-radius: 6px; padding: 8px 12px; }
             @media (max-width: 700px) { h1 { font-size: 19px; } .table-wrap { margin-left: 10px; margin-right: 10px; } p, h5 { margin-left: 10px; margin-right: 10px; } }
