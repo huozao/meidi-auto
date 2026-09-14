@@ -231,7 +231,5 @@ def build_usage_sections(data_dir: Path, monthly_root: Path | None = None) -> st
     recognized = [row for row in rows if row.get("company") != "未备注"]
     return ("<h2>物料出库趋势</h2>"
             + _rows_html(rows, months, current_month, current_date)
-            + f"<p class='usage-note'>统计范围：{months[0]} 至 {current_date}；按近三个月出库总量倒序，今日变化以 +数量表示。数据取自最近三个月月末汇总文件和当前每日库存文件。</p>"
             + "<h2>前五大领用公司及物料明细</h2>"
-            + _companies_html(recognized, rows, months, current_month, current_date)
-            + f"<p class='usage-note'>统计范围：{months[0]} 至 {current_date}；仅统计“领用出库”，前五家公司按近三个月总量排序。集中度 = 前五大公司合计 ÷ 全部领用出库合计；分母包含未备注领用记录。</p>")
+            + _companies_html(recognized, rows, months, current_month, current_date))

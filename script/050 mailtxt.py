@@ -135,6 +135,11 @@ def get_dates(sheet):
     return date, date2
 
 
+def _compact_date(value):
+    """日报仅展示日期，不展示具体时分秒。"""
+    return value[:10] if isinstance(value, str) and len(value) >= 10 else value
+
+
 # ================================
 # 查找 B 列第一个空单元格
 # ================================
@@ -201,10 +206,10 @@ def construct_html_content(sheet, colored_rows, date, date2,
             body { margin: 0; padding: 0; background: #f3f6fa; color: #243447; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; font-size: 14px; line-height: 1.5; }
             body > * { box-sizing: border-box; }
             h1 { margin: 0; padding: 18px 22px 4px; color: #173b63; font-size: 22px; letter-spacing: .2px; }
-            .date-grid { display: flex; gap: 12px; margin: 12px 22px 4px; }
-            .date-card { flex: 1; padding: 10px 14px; background: #e8f1fb; border: 1px solid #c9dced; border-radius: 8px; }
-            .date-card span { display: block; color: #5a6b7d; font-size: 12px; }
-            .date-card strong { display: block; margin-top: 2px; color: #173b63; font-size: 18px; }
+            .date-grid { display: flex; gap: 18px; margin: 4px 22px 2px; color: #718096; }
+            .date-card { flex: 0 0 auto; padding: 2px 0 2px 8px; border-left: 2px solid #c9dced; }
+            .date-card span { color: #718096; font-size: 11px; }
+            .date-card strong { margin-left: 4px; color: #526579; font-size: 12px; font-weight: 500; }
             h2 { margin: 28px 0 8px; padding: 10px 14px; border-left: 5px solid #3b82c4; background: #e8f1fb; color: #173b63; font-size: 18px; }
             h5 { margin: 6px 22px 10px; color: #526579; font-size: 13px; font-weight: 500; }
             p { margin: 8px 22px; color: #5a6b7d; }
@@ -235,7 +240,6 @@ def construct_html_content(sheet, colored_rows, date, date2,
             .company-name { white-space: normal; word-break: break-all; }
             .total-label { text-align: left; }
             .warn { color: #a61c00; background: #fff1f0; border: 1px solid #f3b5ae; border-radius: 6px; padding: 8px 12px; }
-            .usage-note { margin: -8px 22px 18px; padding: 8px 12px; color: #53677c; font-size: 12px; background: #eef4fa; border-left: 3px solid #9bb9d6; border-radius: 4px; }
             @media (max-width: 700px) { h1 { font-size: 19px; } .table-wrap { margin-left: 10px; margin-right: 10px; } p, h5 { margin-left: 10px; margin-right: 10px; } }
         </style>
     </head>
@@ -246,11 +250,10 @@ def construct_html_content(sheet, colored_rows, date, date2,
     html += f"""
     <h1>美的仓储日报</h1>
     <div class="date-grid">
-        <div class="date-card"><span>重庆俊都仓储数据</span><strong>{date}</strong></div>
-        <div class="date-card"><span>家里库存数据</span><strong>{date2}</strong></div>
+        <div class="date-card"><span>俊都仓储</span><strong>{_compact_date(date)}</strong></div>
+        <div class="date-card"><span>家里库存</span><strong>{_compact_date(date2)}</strong></div>
     </div>
     <h5>库存预警物料有 <strong>{len(colored_rows)}</strong> 款</h5>
-    <p class="usage-note">颜色提示：深紫、深红、绿色分别对应不同库存预警状态，淡色为对应物料行的强调背景；具体判定以库存表当前数值为准。</p>
     """
     if auto_list_warning:
         html += f'<p class="warn">{auto_list_warning}</p>'
@@ -284,20 +287,18 @@ def construct_html_content(sheet, colored_rows, date, date2,
         """
 
     html += "</table></div>"
-    html += '<p class="usage-note">外应存、家应存按近3个月出库总量 ÷ 12，作为平均每周用量参考；月计划按近3个月出库总量 ÷ 3，作为平均每月用量参考。</p>'
-
     html += """
     <h5>汇总信息</h5>
     <div class="table-wrap"><table class="summary-table">
-        <tr><th>外仓项目</th><th>数值</th><th>计划/家库存项目</th><th>数值</th></tr>
+        <tr><th>库存项目</th><th>数值</th><th>计划项目</th><th>数值</th></tr>
     """
 
     def cell(label, value):
         return f'<td class="left">{label}</td><td class="right">{value:,.1f}</td>'
 
-    html += "<tr>" + cell("外仓库存总量", stock_total) + cell("月计划（3月月均）", monthly_plan) + "</tr>"
-    html += "<tr>" + cell("外仓出库总量", monthly_sent) + cell("月计划缺口排产", plan_gap_output) + "</tr>"
-    html += "<tr>" + cell("外仓入库总量", monthly_received) + cell("月预估还有要发货", monthly_remaining) + "</tr>"
+    html += "<tr>" + cell("出库", monthly_sent) + cell("月计划", monthly_plan) + "</tr>"
+    html += "<tr>" + cell("入库", monthly_received) + cell("月计划预估还有要发货", monthly_remaining) + "</tr>"
+    html += "<tr>" + cell("外仓库存总量", stock_total) + cell("月计划缺口排产", plan_gap_output) + "</tr>"
     html += "<tr>" + cell("家里库存总量", home_stock_total) + '<td class="left"></td><td class="right"></td></tr>'
 
     html += "</table></div>"
