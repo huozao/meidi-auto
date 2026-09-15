@@ -24,6 +24,11 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Install Excel preview renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-calc fonts-noto-cjk poppler-utils
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
