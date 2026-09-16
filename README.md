@@ -652,4 +652,4 @@ python main.py --list-steps
 
 > GitHub Actions 修复：`050 image.py` 现在会忽略 `--data-dir` 这类参数标记，自动提取最后一个有效路径参数，避免把 `--data-dir` 误当成目录名。
 
-> 邮件图片样式优化：`050 image.py` 已改为“美化版表格渲染”（分层表头 + 斑马纹 + 轻网格 + 原始高亮色覆盖），优先保证邮件端可读性。
+> 邮件图片样式优化：`050 image.py` 使用 LibreOffice Calc 按 Excel 原格式渲染 `库存表`，裁白边并将最终 PNG 宽度限制为 1800px；运行依赖和标题口径见 `docs/PIPELINE_FLOW.md`、`docs/CURRENT_HANDOFF.md`。
