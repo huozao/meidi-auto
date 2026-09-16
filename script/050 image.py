@@ -2,41 +2,39 @@ from __future__ import annotations
 
 # ================================================
 # STEP CARD
-# 功能: 把库存表片段导出为邮件图片附件。
+# 功能: 按 Excel 原生分页和样式导出库存表邮件图片附件。
 # 输入: 总库存*.xlsx
 # 输出: *美的*.png
 # 上游: 042 Color display.py
 # 下游: 051 Send an email.py
+# 运行依赖: LibreOffice Calc、中文字体、poppler-utils
 # ================================================
 
 import glob
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
-import matplotlib.pyplot as plt
-from matplotlib import font_manager, rcParams
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
+from PIL import Image, ImageChops
 
 
-# 尝试使用常见中文字体，避免邮件图中文字发虚/方块
-CANDIDATE_FONTS = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "PingFang SC"]
-for name in CANDIDATE_FONTS:
-    try:
-        font_manager.findfont(name, fallback_to_default=False)
-        rcParams["font.family"] = name
-        break
-    except Exception:
-        continue
+SHEET_NAME = "库存表"
+DEFAULT_COL_RANGE = "A:T"
+RENDER_DPI = 150
+MAX_IMAGE_WIDTH = 1800
 
 
 def resolve_inventory_folder(argv: list[str] | None = None) -> str:
     default_inventory_folder = os.path.abspath(os.path.join(os.getcwd(), "data"))
     argv = argv or sys.argv
 
-    # 兼容 argv 中混入参数标记（例如 --data-dir）
     positional = [item for item in argv[1:] if not item.startswith("-")]
     if positional:
         inventory_folder = positional[-1]
@@ -62,187 +60,182 @@ def pick_inventory_file(inventory_folder: str) -> str:
     return latest_file
 
 
-def _rgb(color) -> str | None:
-    if not color:
-        return None
-    if color.type == "rgb" and color.rgb:
-        return color.rgb[-6:]
-    return None
-
-
-def _to_display(v) -> str:
-    if v is None:
-        return ""
-    return str(v)
-
-
-def _is_non_empty(v) -> bool:
-    if v is None:
-        return False
-    if isinstance(v, str) and not v.strip():
-        return False
-    return True
+def _is_non_empty(value: object) -> bool:
+    return value is not None and (not isinstance(value, str) or bool(value.strip()))
 
 
 def _parse_col_range(value: str) -> tuple[int, int]:
-    """解析 A:T / A- T / A~T 形式。"""
+    """解析 A:T / A-T / A~T 形式。"""
     text = value.strip().upper().replace(" ", "")
-    m = re.fullmatch(r"([A-Z]+)[:\-~]([A-Z]+)", text)
-    if not m:
+    match = re.fullmatch(r"([A-Z]+)[:\-~]([A-Z]+)", text)
+    if not match:
         raise ValueError(f"列范围格式错误: {value}（示例: A:T）")
-    c1 = column_index_from_string(m.group(1))
-    c2 = column_index_from_string(m.group(2))
-    if c1 > c2:
-        c1, c2 = c2, c1
-    return c1, c2
+    first = column_index_from_string(match.group(1))
+    last = column_index_from_string(match.group(2))
+    return min(first, last), max(first, last)
 
 
-def detect_used_bounds(ws, col_start: int, col_end: int, scan_from_row: int = 1) -> tuple[int, int]:
-    """在指定列范围内，自动检测首尾有效行。"""
-    first: int | None = None
-    last: int | None = None
-
-    for r in range(scan_from_row, ws.max_row + 1):
-        has_value = any(_is_non_empty(ws.cell(row=r, column=c).value) for c in range(col_start, col_end + 1))
-        if has_value and first is None:
-            first = r
-        if has_value:
-            last = r
-
-    if first is None or last is None:
-        # 回退一个可渲染最小区间
+def detect_used_bounds(ws, col_start: int, col_end: int) -> tuple[int, int]:
+    """在指定列范围内检测首尾有效行，并保留少量上下边距。"""
+    populated_rows = [
+        row
+        for row in range(1, ws.max_row + 1)
+        if any(_is_non_empty(ws.cell(row=row, column=col).value) for col in range(col_start, col_end + 1))
+    ]
+    if not populated_rows:
         return 1, min(ws.max_row, 40)
-
-    # 留一点上下边距，更接近 Excel 截图体验
-    first = max(1, first - 1)
-    last = min(ws.max_row, last + 2)
-    return first, last
+    return max(1, min(populated_rows) - 1), min(ws.max_row, max(populated_rows) + 2)
 
 
-def build_table_payload(ws, col_start: int, col_end: int, row_start: int, row_end: int):
-    cols = list(range(col_start, col_end + 1))
-    rows = list(range(row_start, row_end + 1))
+def _prepare_render_workbook(
+    source_path: Path,
+    render_path: Path,
+    *,
+    col_start: int,
+    col_end: int,
+) -> tuple[int, int]:
+    """复制工作簿并只保留库存表的邮件预览区域，不改动原始 Excel。"""
+    workbook = load_workbook(source_path, data_only=False)
+    try:
+        if SHEET_NAME not in workbook.sheetnames:
+            raise ValueError(f"工作簿中不存在工作表: {SHEET_NAME}")
+        worksheet = workbook[SHEET_NAME]
+        row_start, row_end = detect_used_bounds(worksheet, col_start, col_end)
+        area = f"{get_column_letter(col_start)}{row_start}:{get_column_letter(col_end)}{row_end}"
 
-    data: list[list[str]] = []
-    txt_colors: list[list[str | None]] = []
-    bg_colors: list[list[str | None]] = []
+        worksheet.print_area = area
+        worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+        worksheet.page_setup.orientation = worksheet.ORIENTATION_LANDSCAPE
+        worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A3
+        worksheet.page_setup.fitToWidth = 1
+        worksheet.page_setup.fitToHeight = 1
+        worksheet.page_margins.left = 0.2
+        worksheet.page_margins.right = 0.2
+        worksheet.page_margins.top = 0.25
+        worksheet.page_margins.bottom = 0.25
+        worksheet.sheet_view.showGridLines = True
 
-    for r in rows:
-        row_data: list[str] = []
-        row_txt: list[str | None] = []
-        row_bg: list[str | None] = []
-        for c in cols:
-            cell = ws.cell(row=r, column=c)
-            row_data.append(_to_display(cell.value))
-            row_txt.append(_rgb(cell.font.color))
-            row_bg.append(_rgb(cell.fill.fgColor))
-        data.append(row_data)
-        txt_colors.append(row_txt)
-        bg_colors.append(row_bg)
-
-    col_widths: list[float] = []
-    for c in cols:
-        letter = get_column_letter(c)
-        width = ws.column_dimensions[letter].width or 8.0
-        col_widths.append(float(width))
-
-    return data, txt_colors, bg_colors, col_widths
+        for sheet in workbook.worksheets:
+            if sheet.title != SHEET_NAME:
+                sheet.sheet_state = "hidden"
+        workbook.active = workbook.index(worksheet)
+        if workbook.calculation is not None:
+            workbook.calculation.fullCalcOnLoad = True
+            workbook.calculation.forceFullCalc = True
+        workbook.save(render_path)
+        return row_start, row_end
+    finally:
+        workbook.close()
 
 
-def render_table_image(data, txt_colors, bg_colors, col_widths, output_path: str) -> None:
-    nrows = len(data)
-    ncols = len(data[0]) if nrows else 0
-    if nrows == 0 or ncols == 0:
-        print("❌ 没有可渲染的数据")
-        raise SystemExit(1)
+def _command_path(*names: str) -> str | None:
+    for name in names:
+        resolved = shutil.which(name)
+        if resolved:
+            return resolved
+    return None
 
-    # 美化版：更宽松的网格、分层表头、交替底色
-    fig_w = max(20, ncols * 1.45)
-    fig_h = max(10, nrows * 0.52)
 
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=230)
-    ax.axis("off")
+def render_excel_preview(source_path: str | Path, output_path: str | Path, col_range: str = DEFAULT_COL_RANGE) -> tuple[int, int]:
+    """使用 LibreOffice + poppler 将库存表原生渲染为 PNG。"""
+    source = Path(source_path)
+    output = Path(output_path)
+    soffice = _command_path("soffice", "libreoffice")
+    pdftoppm = _command_path("pdftoppm")
+    if not soffice or not pdftoppm:
+        missing = []
+        if not soffice:
+            missing.append("LibreOffice (soffice)")
+        if not pdftoppm:
+            missing.append("poppler-utils (pdftoppm)")
+        raise RuntimeError("邮件图片原生渲染缺少: " + ", ".join(missing))
 
-    table = ax.table(cellText=data, cellLoc="center", loc="center")
-    table.auto_set_font_size(False)
-    table.set_fontsize(10)
+    col_start, col_end = _parse_col_range(col_range)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="meidi-excel-preview-") as temp_dir:
+        temp = Path(temp_dir)
+        render_workbook = temp / source.name
+        row_start, row_end = _prepare_render_workbook(
+            source,
+            render_workbook,
+            col_start=col_start,
+            col_end=col_end,
+        )
 
-    total = sum(col_widths) if sum(col_widths) > 0 else ncols
+        profile = temp / "lo-profile"
+        profile_uri = profile.resolve().as_uri()
+        env = os.environ.copy()
+        env["HOME"] = str(temp / "home")
+        env["SAL_USE_VCLPLUGIN"] = "headless"
+        pdf_dir = temp / "pdf"
+        pdf_dir.mkdir()
+        subprocess.run(
+            [
+                soffice,
+                f"-env:UserInstallation={profile_uri}",
+                "--headless",
+                "--convert-to",
+                "pdf:calc_pdf_Export",
+                "--outdir",
+                str(pdf_dir),
+                str(render_workbook),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        pdf_path = pdf_dir / f"{render_workbook.stem}.pdf"
+        if not pdf_path.exists():
+            raise RuntimeError(f"LibreOffice 未生成 PDF: {pdf_path}")
 
-    for r in range(nrows):
-        for c in range(ncols):
-            cell = table[r, c]
-            cell.set_width((col_widths[c] / total) * 0.98)
-            cell.set_height(0.98 / nrows)
-            cell.set_linewidth(0.45)
+        png_prefix = temp / "inventory-preview"
+        subprocess.run(
+            [
+                pdftoppm,
+                "-png",
+                "-r",
+                str(RENDER_DPI),
+                "-singlefile",
+                str(pdf_path),
+                str(png_prefix),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        rendered_png = png_prefix.with_suffix(".png")
+        if not rendered_png.exists():
+            raise RuntimeError(f"poppler 未生成 PNG: {rendered_png}")
+        with Image.open(rendered_png) as rendered:
+            image = rendered.convert("RGB")
+            background = Image.new("RGB", image.size, "white")
+            bounds = ImageChops.difference(image, background).getbbox()
+            if bounds:
+                padding = 24
+                left = max(0, bounds[0] - padding)
+                top = max(0, bounds[1] - padding)
+                right = min(image.width, bounds[2] + padding)
+                bottom = min(image.height, bounds[3] + padding)
+                image = image.crop((left, top, right, bottom))
+            if image.width > MAX_IMAGE_WIDTH:
+                height = round(image.height * MAX_IMAGE_WIDTH / image.width)
+                image = image.resize((MAX_IMAGE_WIDTH, height), Image.Resampling.LANCZOS)
+            image.save(output, format="PNG", optimize=True)
 
-            # 表头行（1~4行）加粗并灰底
-            if r <= 3:
-                cell.get_text().set_fontweight("bold")
-                if r == 3:
-                    cell.set_facecolor("#EFEFEF")
-                else:
-                    cell.set_facecolor("#F7F7F7")
-            else:
-                # 普通数据行做斑马纹，提升可读性
-                if r % 2 == 0:
-                    cell.set_facecolor("#FCFCFC")
-                else:
-                    cell.set_facecolor("#FFFFFF")
-
-            fg = txt_colors[r][c]
-            if fg and fg != "000000":
-                try:
-                    cell.get_text().set_color(f"#{fg}")
-                except Exception:
-                    pass
-
-            # Excel 原始填色优先（覆盖斑马纹）
-            bg = bg_colors[r][c]
-            if bg and bg not in ("000000", "FFFFFF"):
-                try:
-                    cell.set_facecolor(f"#{bg}")
-                except Exception:
-                    pass
-
-            # 简单对齐：前4列偏左，其余偏中/右
-            if c <= 3:
-                cell.get_text().set_ha("left")
-            elif c >= 6:
-                cell.get_text().set_ha("right")
-
-    fig.savefig(output_path, bbox_inches="tight", pad_inches=0.03)
-    plt.close(fig)
+    print(f"🖼️ Excel 原生预览区域: {get_column_letter(col_start)}{row_start}:{get_column_letter(col_end)}{row_end}")
+    return row_start, row_end
 
 
 def main(argv: list[str] | None = None) -> int:
     folder = resolve_inventory_folder(argv or sys.argv)
     latest_file = pick_inventory_file(folder)
-
-    wb = load_workbook(latest_file, data_only=False)
-    ws = wb["库存表"] if "库存表" in wb.sheetnames else wb.active
-
-    # 可通过环境变量覆盖导图列范围（默认 A:T）
-    col_range = os.getenv("MAIL_IMAGE_COL_RANGE", "A:T")
-    col_start, col_end = _parse_col_range(col_range)
-    row_start, row_end = detect_used_bounds(ws, col_start=col_start, col_end=col_end)
-
-    print(
-        f"🖼️ 导图区域: {get_column_letter(col_start)}{row_start}:{get_column_letter(col_end)}{row_end}"
-    )
-
-    data, txt_colors, bg_colors, col_widths = build_table_payload(
-        ws,
-        col_start=col_start,
-        col_end=col_end,
-        row_start=row_start,
-        row_end=row_end,
-    )
-
+    col_range = os.getenv("MAIL_IMAGE_COL_RANGE", DEFAULT_COL_RANGE)
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     image_filepath = os.path.join(folder, f"美的仓储自动化_{current_time}.png")
-    render_table_image(data, txt_colors, bg_colors, col_widths, image_filepath)
-
+    render_excel_preview(latest_file, image_filepath, col_range=col_range)
     print(f"✅ 图片已保存：{image_filepath}")
     return 0
 

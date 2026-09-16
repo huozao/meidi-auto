@@ -1,6 +1,6 @@
 # 美的库存自动化：当前交接状态
 
-> 更新日期：2026-09-14。新会话处理本项目时先读本文，再按需阅读
+> 更新日期：2026-09-16。新会话处理本项目时先读本文，再按需阅读
 > `README.md`、`docs/PIPELINE_FLOW.md` 和 `docs/MONTHLY_SUMMARY_SPEC.md`。
 
 本文的 SHA、运行记录与资源缺口是上述日期的交接快照，后续线上状态需重新取证。
@@ -35,6 +35,15 @@ gh run download <run-id> --repo huozao/meidi-auto --name pipeline-run-report
 - 判据：取上月最后一天 24:00 前的最新目标邮件附件；其与每日归档语义指纹一致才会写入自动月末归档、月度报告和新的自动清单。不一致时仅发人工核验通知，不覆盖已有文件。
 - **当前待跟进项**：手动回溯运行 `34731737697`（目标 `2026-08`）在比较前失败，原因是 WebDAV 的每日归档目录 `NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR/202608` 返回 404。此结果表示缺少核验输入，**不是**“月末文件不一致”。在下一次真实月初核验前，应确认上一月目录已存在，且含有月末当天的 Excel；未完成一次真实月份的“指纹一致 + 报告回写”前，不应宣称月初自动闭环已通过生产验证。
 
+### 2026-09-16 邮件标题与图片附件交接
+
+- 用户已确认标题：`美的库存及出入库日报｜YYYY-MM-DD｜库存、出入库及月计划`；日期取 `库存表!H3`，不再从 PNG 文件名拼接。
+- 用户已确认图片方案：`050 image.py` 使用 LibreOffice Calc 按 `库存表` 的 Excel 样式导出，渲染副本只保留 `A1:T末行`，裁白边并限制最终 PNG 宽度为 `1800px`；原始 Excel 不被改写。
+- GitHub runner 需要 `libreoffice-calc`、`fonts-noto-cjk`、`poppler-utils`，Python 依赖使用 `Pillow`；安装步骤在 `.github/workflows/run-daily.yml`。
+- 本地案例使用 2026-09-15 最新邮件附件验证：标题为 `美的库存及出入库日报｜2026-09-15｜库存、出入库及月计划`，图片为 `1800×985px`，中文、合并表头、颜色、数字格式和合计行均可读。该案例文件在 Windows 业务数据目录，不入 Git。
+- 本次代码交付为 PR [#13](https://github.com/huozao/meidi-auto/pull/13)，核心代码 commit `f97b56015ff27d31ce9e804bae2de89fe6fa0f09`，交接文档随 PR 一并更新；合并后首次生产日报需重新核对邮件主题、图片附件和收件人实际收到的内容。
+- 首轮生产观察至少检查：Actions 日志的 `邮件发送成功`、artifact `run-report.json` 的 `success` / `failed_steps`、实际邮件主题和图片清晰度；Actions 绿灯不等于业务验收完成。若失败，先保留运行产物和日志，再通过 PR 回滚，不直接修改生产数据。
+
 ## 已确认的业务口径
 
 - 月末快照合格的主判据是工作簿 `库存表` 物料表头上方有目标月最后一天日期（例如 `2026年08月31日`）。当天没有出入库业务不是失败，只记录为数据质量提示。
@@ -53,8 +62,9 @@ gh run download <run-id> --repo huozao/meidi-auto --name pipeline-run-report
 4. 若验证月初任务，先确认上一月 WebDAV 每日归档目录及月末 Excel 已存在，再触发；缺目录应先报告输入缺失，不要重试或覆盖月末快照。
 5. 只有获得明确交付授权后，才将代码与受影响文档经测试、提交、推送并通过 PR 合并回 GitHub `main`；本地修改任务不自动进入交付流程。不提交 `.env`、附件、WebDAV 下载、报告或浏览器/运行缓存。
 
-## 当前工作区边界（2026-09-14）
+## 当前工作区边界（2026-09-16）
 
-- 业务代码无未提交改动；本地 `HEAD` 与 `origin/main` 均为 `69ea637c3a7dbe5bedfd75cde2382ef72550dcd2`。
+- 本次交付前 GitHub `main` 基线为 `61ac723f99e43324cb00b813de34b9f99531b5cc`；PR #13 合并后的 `main` SHA 必须以远端实时核对为准。
 - 本地仍保留一组既有、未纳入本次业务提交的指导/历史文档改动：`AGENTS.md`、`README.md`、`CLAUDE.md`、`docs/development.md`、`docs/migrations/`。后续 AI 应先检查其来源和意图，不要重置、清理或混入业务提交；GitHub `main` 仍是代码与已交付文档的唯一源。
 - 本次生产运行页面与 artifact：<https://github.com/huozao/meidi-auto/actions/runs/34844719311>；artifact 仅包含 `pipeline-run-report`，生产 HTML 是运行时邮件内容，不入 Git。
+- 本次邮件展示交付在独立 worktree `codex/mail-preview-case` 完成；PR #13 只包含邮件标题、图片渲染、工作流依赖、测试和相关文档，父工作区原有指导/历史文档改动未混入。合并后的 `main` SHA 和首轮生产 run 需以远端实时核对为准。

@@ -11,14 +11,17 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import smtplib
 import sys
+from datetime import date, datetime
 from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
+from openpyxl import load_workbook
 
 
 def parse_recipients(raw: str) -> list[str]:
@@ -56,6 +59,39 @@ def pick_latest_file(folder: str, pattern: str, required: bool = True) -> str | 
             raise FileNotFoundError(f"没有找到符合条件的文件: {pattern}")
         return None
     return max(files, key=os.path.getctime)
+
+
+def _format_report_date(value: object) -> str:
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    text = str(value or "").strip()
+    match = re.search(r"(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})", text)
+    if match:
+        year, month, day = match.groups()
+        return f"{year}-{int(month):02d}-{int(day):02d}"
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
+
+
+def report_date_from_excel(latest_excel: str) -> str:
+    """读取库存表日期，作为日报标题的业务日期。"""
+    workbook = load_workbook(latest_excel, read_only=True, data_only=True)
+    try:
+        if "库存表" not in workbook.sheetnames:
+            return ""
+        return _format_report_date(workbook["库存表"]["H3"].value)
+    finally:
+        workbook.close()
+
+
+def build_subject(latest_excel: str) -> str:
+    report_date = report_date_from_excel(latest_excel)
+    date_part = f"｜{report_date}" if report_date else ""
+    return f"美的库存及出入库日报{date_part}｜库存、出入库及月计划"
 
 
 def build_message(email_user: str, to_list: list[str], subject: str, html_content: str, latest_image: str | None, latest_excel: str) -> MIMEMultipart:
@@ -128,7 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         print("   EMAIL_PASSWORD_QQ/EMAIL_PASSWOR_QQ =", mask_secret(email_password))
         print("   RECIPIENT_EMAILS 数量 =", len(to_email_list))
 
-        subject = f"物料情况和Excel文件 - {os.path.basename(latest_image) if latest_image else '无图片'}"
+        subject = build_subject(latest_excel)
+        print("✉️ 邮件主题 =", subject)
         msg = build_message(email_user, to_email_list, subject, html_content, latest_image, latest_excel)
         send_message(email_user, email_password, msg)
 
