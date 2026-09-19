@@ -9,6 +9,7 @@
 
 import os
 import sys
+import json
 import openpyxl
 from dotenv import load_dotenv
 from datetime import datetime
@@ -103,7 +104,7 @@ def find_colored_rows(sheet):
 
 
 # ================================
-# 📅 获取日期（H3 与 M3）
+# 📅 获取来源邮件收件时间（缺失时回退 H3 与 M3）
 # ================================
 def _fmt_dt(v):
     """把单元格时间或字符串格式化为 'YYYY-MM-DD HH:MM:SS'；无法解析就原样返回/空串。"""
@@ -124,26 +125,31 @@ def _fmt_dt(v):
     return ""
 
 
-def get_dates(sheet):
+def _read_received_times(meta_path):
+    """优先读取 020 保存的两封来源邮件收件时间；缺失时由工作表时间兜底。"""
+    if not meta_path:
+        return None, None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        return None, None
+    return (
+        _fmt_dt(meta.get("selected_heyu_da_received_at")),
+        _fmt_dt(meta.get("selected_waiting_received_at")),
+    )
+
+
+def get_dates(sheet, meta_path=None):
     """
     返回 (date, date2)
-    - date  来自 H3（原标题用）
-    - date2 来自 M3（家里库存数据用）
+    - 优先使用 020 的来源邮件收件时间
+    - 缺少邮件元数据时，分别回退到 H3/M3
     """
-    date = _fmt_dt(sheet["H3"].value)
-    date2 = _fmt_dt(sheet["M3"].value)
+    date, date2 = _read_received_times(meta_path)
+    date = date or _fmt_dt(sheet["H3"].value)
+    date2 = date2 or _fmt_dt(sheet["M3"].value)
     return date, date2
-
-
-def _compact_date(value):
-    """日报仅展示日期，不展示具体时分秒。"""
-    if not isinstance(value, str):
-        return value
-    match = re.search(r"(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})", value.strip())
-    if match:
-        year, month, day = match.groups()
-        return f"{year}-{int(month):02d}-{int(day):02d}"
-    return value[:10] if len(value) >= 10 else value
 
 
 # ================================
@@ -253,12 +259,12 @@ def construct_html_content(sheet, colored_rows, date, date2,
     <body>
     """
 
-    # 两个数据时间卡片：H3 对应重庆俊都仓储，M3 对应家里库存
+    # 两个数据时间卡片：俊都仓储/家里库存分别对应两封来源邮件
     html += f"""
     <h1>美的仓储日报</h1>
     <div class="date-grid">
-        <div class="date-card"><span>俊都仓储</span><strong>{_compact_date(date)}</strong></div>
-        <div class="date-card"><span>家里库存</span><strong>{_compact_date(date2)}</strong></div>
+        <div class="date-card"><span>俊都仓储</span><strong>{date}</strong></div>
+        <div class="date-card"><span>家里库存</span><strong>{date2}</strong></div>
     </div>
     <h5>库存预警物料有 <strong>{len(colored_rows)}</strong> 款</h5>
     """
@@ -270,7 +276,7 @@ def construct_html_content(sheet, colored_rows, date, date2,
         <tr>
             <th>编号</th>
             <th>库存</th>
-            <th>外应存（3月周均）</th>
+            <th>外应存（3月2周均）</th>
             <th>家里库存</th>
         </tr>
     """
@@ -337,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     sheet = load_worksheet(inventory_file)
 
     colored_rows = find_colored_rows(sheet)
-    date, date2 = get_dates(sheet)  # 👈 同时拿 H3 / M3
+    date, date2 = get_dates(sheet, Path(inventory_folder) / "mail_meta.json")
     last_empty_row = find_last_empty_row(sheet)
     print(f"⚡ 发现 B 列第一个空单元格所在行: {last_empty_row}")
 

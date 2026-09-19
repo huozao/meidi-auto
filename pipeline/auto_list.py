@@ -14,7 +14,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from .monthly_summary import AggregationResult, month_token, normalize_code
 
 
-AUTO_LIST_HEADERS = ("编号", "外应存(3月周均)", "家应存(3月周均)", "月计划(3月月均)", "备注", "比例", "近3月出库总量", "基准月份")
+AUTO_LIST_HEADERS = ("编号", "外应存(3月2周均)", "家应存(3月2周均)", "月计划(3月月均)", "备注", "比例", "近3月出库总量", "基准月份")
 
 
 @dataclass(frozen=True)
@@ -84,15 +84,16 @@ def build_auto_list_frame(result: AggregationResult, anchor_month: str) -> tuple
     totals = window.groupby("编号", as_index=False)["outbound"].sum().rename(columns={"outbound": "近3月出库总量"})
     frame = latest[["编号"]].merge(totals, on="编号", how="left")
     frame["近3月出库总量"] = frame["近3月出库总量"].fillna(0.0)
-    frame["外应存"] = (frame["近3月出库总量"] / 12).round(2)
-    frame["家应存"] = (frame["近3月出库总量"] / 12).round(2)
+    # 近三个月总量 / 6 = 两周用量；外仓和家里各承担两周，合计覆盖一个月。
+    frame["外应存"] = (frame["近3月出库总量"] / 6).round(2)
+    frame["家应存"] = (frame["近3月出库总量"] / 6).round(2)
     frame["月计划"] = (frame["近3月出库总量"] / 3).round(2)
     frame["备注"] = None
     frame["比例"] = None
     frame["基准月份"] = f"{month_token(source_months[0])}~{month_token(source_months[-1])}"
     frame = frame.rename(columns={
-        "外应存": "外应存(3月周均)",
-        "家应存": "家应存(3月周均)",
+        "外应存": "外应存(3月2周均)",
+        "家应存": "家应存(3月2周均)",
         "月计划": "月计划(3月月均)",
     })
     return frame.loc[:, AUTO_LIST_HEADERS].sort_values("编号").reset_index(drop=True), source_months
