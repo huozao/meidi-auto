@@ -66,8 +66,10 @@ def migrate_legacy_list(source: bytes) -> tuple[bytes, int]:
 
         if headers.get(NEW_EXTERNAL) and headers.get(NEW_HOME):
             raise ValueError("自动清单已经是 3月2周均口径，无需重复迁移")
+        discovered = ", ".join(headers) or "(空)"
         raise ValueError(
-            f"无法安全识别自动清单口径，表头需同时包含“{OLD_EXTERNAL}”“{OLD_HOME}”"
+            f"无法安全识别自动清单口径，实际表头: {discovered}；"
+            f"需同时包含“{OLD_EXTERNAL}”“{OLD_HOME}”"
         )
     finally:
         wb.close()
