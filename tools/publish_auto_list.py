@@ -23,8 +23,8 @@ if str(REPO_ROOT) not in sys.path:
 from pipeline.archive import WebDavStore
 
 
-OLD_EXTERNAL = "外应存(3月周均)"
-OLD_HOME = "家应存(3月周均)"
+OLD_EXTERNAL_HEADERS = ("外应存(1周)", "外应存(3月周均)")
+OLD_HOME_HEADERS = ("家应存(1周)", "家应存(3月周均)")
 NEW_EXTERNAL = "外应存(3月2周均)"
 NEW_HOME = "家应存(3月2周均)"
 
@@ -44,8 +44,8 @@ def migrate_legacy_list(source: bytes) -> tuple[bytes, int]:
     try:
         ws = wb.active
         headers = {str(cell.value).strip(): cell.column for cell in ws[1] if cell.value is not None}
-        ext_col = headers.get(OLD_EXTERNAL)
-        home_col = headers.get(OLD_HOME)
+        ext_col = next((headers.get(label) for label in OLD_EXTERNAL_HEADERS if headers.get(label)), None)
+        home_col = next((headers.get(label) for label in OLD_HOME_HEADERS if headers.get(label)), None)
         if ext_col and home_col:
             ws.cell(row=1, column=ext_col, value=NEW_EXTERNAL)
             ws.cell(row=1, column=home_col, value=NEW_HOME)
@@ -69,7 +69,7 @@ def migrate_legacy_list(source: bytes) -> tuple[bytes, int]:
         discovered = ", ".join(headers) or "(空)"
         raise ValueError(
             f"无法安全识别自动清单口径，实际表头: {discovered}；"
-            f"需同时包含“{OLD_EXTERNAL}”“{OLD_HOME}”"
+            f"需同时包含旧版“外应存(1周/3月周均)”和“家应存(1周/3月周均)”"
         )
     finally:
         wb.close()
