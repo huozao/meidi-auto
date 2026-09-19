@@ -1,0 +1,30 @@
+name: Publish auto list two-week migration
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: meidiauto-auto-list-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Migrate and publish auto list only
+        env:
+          NUTSTORE_WEBDAV_URL: ${{ secrets.NUTSTORE_WEBDAV_URL || 'https://dav.jianguoyun.com/dav/' }}
+          NUTSTORE_WEBDAV_USER: ${{ secrets.NUTSTORE_WEBDAV_USER }}
+          NUTSTORE_WEBDAV_APP_PASSWORD: ${{ secrets.NUTSTORE_WEBDAV_APP_PASSWORD }}
+          NUTSTORE_REMOTE_AUTO_LIST_FILE: ${{ secrets.NUTSTORE_REMOTE_AUTO_LIST_FILE }}
+        run: python tools/publish_auto_list.py
