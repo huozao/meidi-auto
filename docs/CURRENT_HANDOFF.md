@@ -1,6 +1,6 @@
 # 美的库存自动化：当前交接状态
 
-> 更新日期：2026-09-16。新会话处理本项目时先读本文，再按需阅读
+> 更新日期：2026-09-19。新会话处理本项目时先读本文，再按需阅读
 > `README.md`、`docs/PIPELINE_FLOW.md` 和 `docs/MONTHLY_SUMMARY_SPEC.md`。
 
 本文的 SHA、运行记录与资源缺口是上述日期的交接快照，后续线上状态需重新取证。
@@ -9,7 +9,7 @@
 ## 代码、数据与执行边界
 
 - **唯一代码源**：GitHub 仓库 `huozao/meidi-auto` 的 `main`。WSL 工作目录只作为开发、排查和本地验证副本；不得以本地未推送代码作为生产版本。
-- **当前上线基线**：`69ea637c3a7dbe5bedfd75cde2382ef72550dcd2`（GitHub `main`，2026-09-14）。该提交在 `94cef848` 的基础上调整每日邮件 HTML：移除解释性说明，库存获取日期改为弱化的紧凑日期行，汇总四列按“出库、入库、外仓库存总量、家里库存总量”与“月计划、月计划预估还有要发货、月计划缺口排产”排列。
+- **当前上线基线**：`f5a1379808a6683b04ea2ab859296ac5a7a00ef6`（GitHub `main`，2026-09-19）。该提交包含 PR #14 的库存两周均值与邮件收件时间改动；GitHub `main` 是生产唯一代码源。
 - **业务数据不入 Git**：邮件附件、月末快照、Excel/HTML 报告和坚果云同步文件均是运行数据；邮箱与 WebDAV 凭据只存在 WSL `.env` 或 GitHub Actions Secrets。
 - **数据留存**：每日附件归档到 `NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR/YYYYMM/`；月度快照、报告、当前自动清单和按月副本归入 `NUTSTORE_REMOTE_MONTHLY_ARCHIVE_DIR`。Windows 坚果云同步目录与 WebDAV 是同一业务留存体系，但不是代码源。
 
@@ -21,6 +21,13 @@
 - 正常自动链路：Gmail Watch -> Pub/Sub -> `gmail-watcher` Cloud Run -> GitHub `workflow_dispatch` -> 本仓工作流；人工复核也可以在 Actions 页面或用 `gh workflow run` 手动发起。
 - 最近实测：运行 `34844719311`（2026-09-14，使用 SHA `69ea637`），耗时 76.79 秒；读取当日文件 `总库存20260914_204108.xlsx`，生成 HTML，日志出现“邮件发送成功”（配置收件人数 3），并完成坚果云 3 个文件归档。artifact `run-report.json` 为 `success: true` 且 `failed_steps: []`。该记录证明发送端成功，不等同于收件人已读或已收到。
 - **验收不能只看 Actions 绿灯**：该工作流对仅 `020 Email download.py` 失败存在软失败放行。必须同时检查 artifact 的 `run-report.json`、`failed_steps` 以及日志中的“邮件发送成功”。
+
+### 2026-09-19 库存口径与邮件收件时间交付
+
+- PR [#14](https://github.com/huozao/meidi-auto/pull/14) 已合并，合并提交为 `f5a1379808a6683b04ea2ab859296ac5a7a00ef6`。外应存、家应存分别按近三个月出库总量 `/ 6` 计算两周均值，两处合计 `/ 3` 覆盖一个月均用量；日报 HTML 优先读取 `mail_meta.json` 中两封来源邮件的收件时间并展示到秒，缺失时回退 H3/M3。
+- 首次生产运行 [35421736354](https://github.com/huozao/meidi-auto/actions/runs/35421736354) 于 2026-09-19（UTC）完成，耗时 57.25 秒；artifact `run-report.json` 为 `success: true`、`failed_steps: []`、`skipped` 未启用，11 个步骤均执行成功。
+- 运行日志确认：`RECIPIENT_EMAILS` 配置为 3 个收件人，出现“邮件发送成功”；坚果云归档完成 3 个文件。发送日志/归档日志证明发送端和归档端成功，不等同于收件人已读或实际收到；用户计划当晚观察邮件展示。
+- 本次生产运行使用主题“美的库存及出入库日报｜2026-09-18｜库存、出入库及月计划”；邮件正文和附件为运行时产物，不入 Git。后续如需核对 HTML 的秒级时间，应以收件人实际邮件正文为准。
 
 推荐复核命令（不包含任何凭据）：
 
@@ -62,9 +69,8 @@ gh run download <run-id> --repo huozao/meidi-auto --name pipeline-run-report
 4. 若验证月初任务，先确认上一月 WebDAV 每日归档目录及月末 Excel 已存在，再触发；缺目录应先报告输入缺失，不要重试或覆盖月末快照。
 5. 只有获得明确交付授权后，才将代码与受影响文档经测试、提交、推送并通过 PR 合并回 GitHub `main`；本地修改任务不自动进入交付流程。不提交 `.env`、附件、WebDAV 下载、报告或浏览器/运行缓存。
 
-## 当前工作区边界（2026-09-16）
+## 当前工作区边界（2026-09-19）
 
-- 本次交付前 GitHub `main` 基线为 `61ac723f99e43324cb00b813de34b9f99531b5cc`；PR #13 合并后的 `main` SHA 必须以远端实时核对为准。
-- 本地仍保留一组既有、未纳入本次业务提交的指导/历史文档改动：`AGENTS.md`、`README.md`、`CLAUDE.md`、`docs/development.md`、`docs/migrations/`。后续 AI 应先检查其来源和意图，不要重置、清理或混入业务提交；GitHub `main` 仍是代码与已交付文档的唯一源。
-- 本次生产运行页面与 artifact：<https://github.com/huozao/meidi-auto/actions/runs/34844719311>；artifact 仅包含 `pipeline-run-report`，生产 HTML 是运行时邮件内容，不入 Git。
-- 本次邮件展示交付在独立 worktree `codex/mail-preview-case` 完成；PR #13 只包含邮件标题、图片渲染、工作流依赖、测试和相关文档，父工作区原有指导/历史文档改动未混入。合并后的 `main` SHA 和首轮生产 run 需以远端实时核对为准。
+- GitHub `main` 当前远端 SHA 为 `f5a1379808a6683b04ea2ab859296ac5a7a00ef6`，PR #14 已合并；生产运行 `35421736354` 已完成。后续 AI 仍应先执行 `git ls-remote origin refs/heads/main` 和 `git status --short`，不要把本地副本当作生产代码源。
+- 原始工作区仍保留一组未提交的既有指导/历史文档改动：`AGENTS.md`、`README.md`、`CLAUDE.md`、`docs/development.md`、`docs/migrations/`，以及本次早期开发副本的业务文件改动。它们未进入 PR #14，也未进入 GitHub `main`；不得 reset、clean 或未经核对混入后续提交。若后续需要交付这些文档，必须单独审阅并走 PR。
+- 生产 artifact 仅保留 `pipeline-run-report`；Excel、HTML、邮件附件和 WebDAV 文件是运行时业务数据，不入 Git。发送日志不能替代收件人实际收到的证明。
