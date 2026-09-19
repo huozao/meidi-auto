@@ -89,8 +89,8 @@ if INV_SHEET not in wb_inventory.sheetnames:
     print(f"❌ 库存缺少工作表: {INV_SHEET}"); sys.exit(1)
 sheet_inventory = wb_inventory[INV_SHEET]
 # 标注自动清单的数值口径；041 会按“字段名或字段名前缀”兼容读取。
-sheet_inventory.cell(row=4, column=11, value="外应存(3月周均)")
-sheet_inventory.cell(row=4, column=14, value="家应存(3月周均)")
+sheet_inventory.cell(row=4, column=11, value="外应存(3月2周均)")
+sheet_inventory.cell(row=4, column=14, value="家应存(3月2周均)")
 sheet_inventory.cell(row=4, column=16, value="月计划(3月月均)")
 
 # =======================
