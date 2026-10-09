@@ -1,6 +1,7 @@
 # ================================================
 # STEP CARD
 # 功能: 计算最小发货/排产/月计划缺口并写合计。
+#       支持畅捷通缺失降级模式（排产与缺口置空，不误导生产）。
 # 输入: 总库存*.xlsx
 # 输出: 更新后的总库存*.xlsx
 # 上游: 033 list insertion.py
@@ -100,6 +101,10 @@ try:
 
     print("✅ 表头索引解析完成")
 
+    home_stock_unavailable = (Path(inventory_folder) / ".home-stock-unavailable").exists()
+    if home_stock_unavailable:
+        print("⚠️ 检测到家里库存缺失标记（.home-stock-unavailable），排产与月计划缺口将置空不予计算。")
+
     gray_font = Font(color="D8D8D8")
     default_font = Font(color="000000")
 
@@ -122,20 +127,25 @@ try:
         ref_value = safe_float(sheet[f"{col_letter(col_ref)}{row_idx}"].value)
 
         min_ship_result = external_stock - ref_value
-        production_result = home_stock + external_stock - ref_value - stock_at_home
-        gap_result = month_plan - stock_at_home - total_stock - external_shipped
-
-        if DEBUG_PRINT and (not DEBUG_ROWS or row_idx in DEBUG_ROWS):
-            print(f"🔍 行 {row_idx} | 月计划: {month_plan:.1f}, 家里库存: {stock_at_home:.1f}, "
-                  f"库存: {total_stock:.1f}, 外仓出库: {external_shipped:.1f} → 缺口: {gap_result:.1f}")
-
         sheet[f"{col_letter(col_min_ship)}{row_idx}"].value = min_ship_result
-        sheet[f"{col_letter(col_production)}{row_idx}"].value = production_result
-        sheet[f"{col_letter(col_gap)}{row_idx}"].value = gap_result
-
         sheet[f"{col_letter(col_min_ship)}{row_idx}"].font = gray_font if min_ship_result <= 0 else default_font
-        sheet[f"{col_letter(col_production)}{row_idx}"].font = gray_font if production_result <= 0 else default_font
-        sheet[f"{col_letter(col_gap)}{row_idx}"].font = gray_font if gap_result <= 0 else default_font
+
+        if home_stock_unavailable:
+            sheet[f"{col_letter(col_production)}{row_idx}"].value = None
+            sheet[f"{col_letter(col_gap)}{row_idx}"].value = None
+        else:
+            production_result = home_stock + external_stock - ref_value - stock_at_home
+            gap_result = month_plan - stock_at_home - total_stock - external_shipped
+
+            if DEBUG_PRINT and (not DEBUG_ROWS or row_idx in DEBUG_ROWS):
+                print(f"🔍 行 {row_idx} | 月计划: {month_plan:.1f}, 家里库存: {stock_at_home:.1f}, "
+                      f"库存: {total_stock:.1f}, 外仓出库: {external_shipped:.1f} → 缺口: {gap_result:.1f}")
+
+            sheet[f"{col_letter(col_production)}{row_idx}"].value = production_result
+            sheet[f"{col_letter(col_gap)}{row_idx}"].value = gap_result
+
+            sheet[f"{col_letter(col_production)}{row_idx}"].font = gray_font if production_result <= 0 else default_font
+            sheet[f"{col_letter(col_gap)}{row_idx}"].font = gray_font if gap_result <= 0 else default_font
 
     print("✅ 公式计算完成")
     # ================================
@@ -148,13 +158,19 @@ try:
         end_row = last_empty_row - 1
         total = 0
 
+        cell_addr = f"{col_letter}{last_empty_row}"
+        sum_cell = sheet[cell_addr]
+
+        # 降级模式下，家里库存、排产、月计划缺口列不计算合计
+        if home_stock_unavailable and col in (col_stock, col_production, col_gap):
+            sum_cell.value = None
+            print(f"⏭️ 降级模式跳过合计 → {cell_addr}")
+            continue
+
         for row in range(start_row, end_row + 1):
             cell_value = sheet.cell(row=row, column=col).value
             if isinstance(cell_value, (int, float)) and cell_value >= 0:
                 total += cell_value
-
-        cell_addr = f"{col_letter}{last_empty_row}"
-        sum_cell = sheet[cell_addr]
 
         if sum_cell.value is not None:
             print(f"⚠️  原有值将被覆盖 → {cell_addr} 原值: {sum_cell.value}")

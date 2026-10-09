@@ -1,6 +1,6 @@
 # 美的库存自动化：当前交接状态
 
-> 更新日期：2026-09-19。新会话处理本项目时先读本文，再按需阅读
+> 更新日期：2026-10-09。新会话处理本项目时先读本文，再按需阅读
 > `README.md`、`docs/PIPELINE_FLOW.md` 和 `docs/MONTHLY_SUMMARY_SPEC.md`。
 
 本文的 SHA、运行记录与资源缺口是上述日期的交接快照，后续线上状态需重新取证。
@@ -21,6 +21,16 @@
 - 正常自动链路：Gmail Watch -> Pub/Sub -> `gmail-watcher` Cloud Run -> GitHub `workflow_dispatch` -> 本仓工作流；人工复核也可以在 Actions 页面或用 `gh workflow run` 手动发起。
 - 最近实测：运行 `34844719311`（2026-09-14，使用 SHA `69ea637`），耗时 76.79 秒；读取当日文件 `总库存20260914_204108.xlsx`，生成 HTML，日志出现“邮件发送成功”（配置收件人数 3），并完成坚果云 3 个文件归档。artifact `run-report.json` 为 `success: true` 且 `failed_steps: []`。该记录证明发送端成功，不等同于收件人已读或已收到。
 - **验收不能只看 Actions 绿灯**：该工作流对仅 `020 Email download.py` 失败存在软失败放行。必须同时检查 artifact 的 `run-report.json`、`failed_steps` 以及日志中的“邮件发送成功”。
+
+### 2026-10-09 缺家里库存降级机制交付
+
+- 解决畅捷通系统家里库存邮件（`等待您查看`）缺失时流水线阻断、无法发送当天外仓与出入库报表的问题。
+- `020 Email download.py`：未检测到畅捷通邮件且外仓对账表正常时，生成 `.home-stock-unavailable` 标记与合规占位存量查询 Excel 文件，满足 `validate_step_output` 契约并允许流程继续；
+- `030 Warehousing at home.py`：M3 标为“未同步（缺失）”，家里库存 M 列安全跳过回填；
+- `041 operation.py`：最小发货与外仓指标正常计算；排产与月计划缺口置空（避免误导生产过度备料），合计行不统计这两项；
+- `050 mailtxt.py`：邮件 HTML 顶部增加醒目特别提醒横幅，时间卡片标红，预警物料与汇总表中家里库存标为“未同步”，缺口排产标为“无法计算”；
+- `051 Send an email.py`：邮件主题增加 `【⚠️缺家里库存】` 前缀；
+- 新增单元测试 `tests/test_degraded_pipeline.py`，全套 20 个测试全部通过。
 
 ### 2026-09-19 库存口径与邮件收件时间交付
 

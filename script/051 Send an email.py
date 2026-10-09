@@ -3,7 +3,8 @@ from __future__ import annotations
 # ================================================
 # STEP CARD
 # 功能: 组装 HTML/图片/Excel 并发送邮件。
-# 输入: output.html, *美的*.png, 总库存*.xlsx, EMAIL_*
+#       支持畅捷通缺失降级时邮件主题前置“【⚠️缺家里库存】”。
+# 输入: output.html, *美的*.png, 总库存*.xlsx, EMAIL_*, .home-stock-unavailable(可选)
 # 输出: 邮件发送结果（stdout）
 # 上游: 050 image.py + 050 mailtxt.py
 # 下游: 无（终端动作）
@@ -88,10 +89,11 @@ def report_date_from_excel(latest_excel: str) -> str:
         workbook.close()
 
 
-def build_subject(latest_excel: str) -> str:
+def build_subject(latest_excel: str, home_stock_unavailable: bool = False) -> str:
     report_date = report_date_from_excel(latest_excel)
     date_part = f"｜{report_date}" if report_date else ""
-    return f"美的库存及出入库日报{date_part}｜库存、出入库及月计划"
+    prefix = "【⚠️缺家里库存】" if home_stock_unavailable else ""
+    return f"{prefix}美的库存及出入库日报{date_part}｜库存、出入库及月计划"
 
 
 def build_message(email_user: str, to_list: list[str], subject: str, html_content: str, latest_image: str | None, latest_excel: str) -> MIMEMultipart:
@@ -164,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
         print("   EMAIL_PASSWORD_QQ/EMAIL_PASSWOR_QQ =", mask_secret(email_password))
         print("   RECIPIENT_EMAILS 数量 =", len(to_email_list))
 
-        subject = build_subject(latest_excel)
+        home_stock_unavailable = os.path.exists(os.path.join(inventory_folder, ".home-stock-unavailable"))
+        subject = build_subject(latest_excel, home_stock_unavailable=home_stock_unavailable)
         print("✉️ 邮件主题 =", subject)
         msg = build_message(email_user, to_email_list, subject, html_content, latest_image, latest_excel)
         send_message(email_user, email_password, msg)

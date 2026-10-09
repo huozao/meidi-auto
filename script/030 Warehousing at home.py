@@ -3,6 +3,7 @@
 # ================================================
 # STEP CARD
 # 功能: 回填家里库存并写入邮件时间到库存主表。
+#       支持畅捷通缺失时 M3 标为“未同步（缺失）”且 M 列安全跳过回填。
 # 输入: 总库存*.xlsx, mail_meta.json
 # 输出: 更新后的总库存*.xlsx
 # 上游: 021 Merge excel.py
@@ -306,13 +307,16 @@ def main(cfg: dict):
     sh.sheet_view.selection = [Selection(activeCell=cfg["focus_cell"], sqref=cfg["focus_cell"])]
 
     # ---------- 最后一步：写入“等待您查看”的收到时间到 M3 ----------
+    home_stock_unavailable = (Path(folder_path) / ".home-stock-unavailable").exists()
     waiting_time = _read_waiting_time(folder_path, cfg["meta_filename"], cfg["meta_waiting_key"])
-    if waiting_time:
+    if home_stock_unavailable or not waiting_time:
+        sh["M3"].value = "未同步（缺失）"
+        sh["M3"].alignment = Alignment(horizontal="left", vertical="center")
+        print("🕒 家里库存未同步，已在 M3 标记为【未同步（缺失）】")
+    else:
         sh["M3"].value = waiting_time
         sh["M3"].alignment = Alignment(horizontal="left", vertical="center")
         print(f"🕒 已写入 M3（等待您查看时间）: {waiting_time}")
-    else:
-        print("🕒 没有可写入的等待时间（mail_meta.json 缺失或键为空）")
 
     # ---------- 保存 ----------
     wb.save(latest_file)

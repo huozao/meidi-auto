@@ -2,9 +2,10 @@
 
 # ================================================
 # STEP CARD
-# 功能: 连接 IMAP 下载邮件与附件，生成邮件元数据。
+# 功能: 连接 IMAP 下载邮件与附件，生成邮件元数据与存量查询。
+#       支持畅捷通家里库存邮件缺失时生成占位存量查询及降级标记。
 # 输入: EMAIL_* 环境变量, IMAP_SERVER
-# 输出: mail_meta.json, 存量查询*.xlsx
+# 输出: mail_meta.json, 存量查询*.xlsx, .home-stock-unavailable(可选)
 # 上游: 主流程入口
 # 下游: 021 Merge excel.py
 # ================================================
@@ -84,6 +85,23 @@ KEYWORDS = {
 MAILBOX = os.getenv("IMAP_MAILBOX", "INBOX")
 RECENT_LIMIT = int(os.getenv("RECENT_LIMIT", "15"))
 META_FILENAME = "mail_meta.json"
+HOME_STOCK_UNAVAILABLE_FLAG = ".home-stock-unavailable"
+
+
+def create_placeholder_inventory_excel(save_dir: str, file_prefix="存量查询") -> str:
+    """当畅捷通家里库存邮件缺失时，生成一份带标准表头的占位文件供后续步骤读取。"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "第一页"
+    headers = ["仓库", "存货编码", "存货名称", "规格型号", "主计量", "主数量"]
+    ws.append(headers)
+    timestamp = now_shanghai().strftime("%Y%m%d_%H%M%S")
+    file_name = f"{file_prefix}_{timestamp}.xlsx"
+    full_path = os.path.join(save_dir, file_name)
+    wb.save(full_path)
+    wb.close()
+    print(f"📄 已生成降级占位存量查询文件: {full_path}")
+    return full_path
 
 # ================================
 # 📧 邮箱凭据（.env）
@@ -202,19 +220,37 @@ def fetch_html_from_emails(server: str, user: str, password: str, save_dir: str)
         # 选出“合肥市和裕达”最新一封
         selected_heyu = _pick_latest(inventory_query_emails, KEYWORDS["heyu_da"])
         if selected_heyu:
-            html_content = extract_html_from_msg(selected_heyu["msg"]) or html_content
             print(f"\n📌 选中(合肥市和裕达): {selected_heyu['cleaned_subject']} | {selected_heyu['date'].strftime('%Y-%m-%d %H:%M:%S %z')}")
             meta["selected_heyu_da_subject"] = selected_heyu["cleaned_subject"]
             meta["selected_heyu_da_received_at"] = selected_heyu["date"].isoformat()
             download_attachments(selected_heyu["msg"], save_dir)
+        else:
+            print(f"\n❌ 未找到包含“{KEYWORDS['heyu_da']}”的对账表邮件，缺少基底文件！")
+
+        flag_path = os.path.join(save_dir, HOME_STOCK_UNAVAILABLE_FLAG)
 
         # 选出“等待您查看”最新一封
         selected_waiting = _pick_latest(inventory_query_emails, KEYWORDS["waiting"])
         if selected_waiting:
-            html_content = extract_html_from_msg(selected_waiting["msg"]) or html_content
+            html_content = extract_html_from_msg(selected_waiting["msg"])
             print(f"\n📌 选中(等待您查看): {selected_waiting['cleaned_subject']} | {selected_waiting['date'].strftime('%Y-%m-%d %H:%M:%S %z')}")
             meta["selected_waiting_subject"] = selected_waiting["cleaned_subject"]
             meta["selected_waiting_received_at"] = selected_waiting["date"].isoformat()
+            meta["home_stock_available"] = True
+            if os.path.exists(flag_path):
+                try:
+                    os.remove(flag_path)
+                except OSError:
+                    pass
+        else:
+            print(f"\n⚠️ 未找到包含“{KEYWORDS['waiting']}”的畅捷通家里库存邮件，进入降级模式。")
+            meta["selected_waiting_subject"] = None
+            meta["selected_waiting_received_at"] = None
+            meta["home_stock_available"] = False
+            if selected_heyu:
+                with open(flag_path, "w", encoding="utf-8") as f:
+                    f.write(f"未检测到包含关键词“{KEYWORDS['waiting']}”的畅捷通邮件\n")
+                create_placeholder_inventory_excel(save_dir)
 
         _write_meta(meta, os.path.join(save_dir, META_FILENAME))
 
@@ -471,6 +507,8 @@ def _write_meta(meta: dict, path: str) -> None:
 if __name__ == '__main__':
     print(f"程序启动（北京时）: {now_shanghai().strftime('%Y-%m-%d %H:%M:%S %z')}")
     html_content = fetch_html_from_emails(email_server, email_user, email_password, excel_save_path)
+    flag_path = os.path.join(excel_save_path, HOME_STOCK_UNAVAILABLE_FLAG)
+    is_degraded = os.path.exists(flag_path)
 
     if html_content:
         preview = html_content[:400].replace("\n", " ")
@@ -480,7 +518,10 @@ if __name__ == '__main__':
         if table_data:
             save_to_excel(table_data, excel_save_path, file_prefix="存量查询")
         else:
-            print("表格为空，未导出 Excel。")
+            print("表格为空，未导出常规 Excel。生成降级占位文件。")
+            create_placeholder_inventory_excel(excel_save_path)
+    elif is_degraded:
+        print("✅ 处于缺家里库存降级模式，已生成占位存量查询文件，流程继续。")
     else:
-        print("未获取到 HTML，程序结束。")
+        print("未获取到 HTML 且未进入有效降级模式，程序结束。")
         raise SystemExit(1)

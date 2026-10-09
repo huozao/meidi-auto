@@ -1,7 +1,8 @@
 # ================================================
 # STEP CARD
 # 功能: 生成邮件正文 HTML（异常信息与摘要）。
-# 输入: 总库存*.xlsx
+#       支持畅捷通缺失降级展示（顶部警示横幅，家里库存与缺口安全占位）。
+# 输入: 总库存*.xlsx, .home-stock-unavailable(可选)
 # 输出: output.html
 # 上游: 042 Color display.py
 # 下游: 051 Send an email.py
@@ -190,14 +191,19 @@ def calculate_sum(sheet, formula):
 # ================================
 # 获取库存合计信息
 # ================================
-def prepare_summary_text(sheet, last_empty_row):
+def prepare_summary_text(sheet, last_empty_row, home_stock_unavailable=False):
     stock_total       = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=10).value)
     monthly_plan      = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=16).value)
-    plan_gap_output   = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=17).value)
     monthly_sent      = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=18).value)
     monthly_received  = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=19).value)
-    home_stock_total  = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=13).value)
     monthly_remaining = monthly_plan - monthly_sent if monthly_plan and monthly_sent else 0
+
+    if home_stock_unavailable:
+        plan_gap_output   = None
+        home_stock_total  = None
+    else:
+        plan_gap_output   = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=17).value)
+        home_stock_total  = calculate_sum(sheet, sheet.cell(row=last_empty_row, column=13).value)
 
     print(f"📊 外仓库存: {stock_total}, 家里库存: {home_stock_total}, 月计划: {monthly_plan}, 缺口排产: {plan_gap_output}, 出库: {monthly_sent}, 入库: {monthly_received}")
     return stock_total, monthly_plan, plan_gap_output, monthly_sent, monthly_received, monthly_remaining, home_stock_total
@@ -209,7 +215,7 @@ def prepare_summary_text(sheet, last_empty_row):
 def construct_html_content(sheet, colored_rows, date, date2,
                            stock_total, monthly_plan, plan_gap_output,
                            monthly_sent, monthly_received, monthly_remaining, home_stock_total,
-                           usage_sections="", auto_list_warning=""):
+                           usage_sections="", auto_list_warning="", home_stock_unavailable=False):
     html = """
     <html>
     <head>
@@ -260,14 +266,21 @@ def construct_html_content(sheet, colored_rows, date, date2,
     """
 
     # 两个数据时间卡片：俊都仓储/家里库存分别对应两封来源邮件
+    date2_display = f'<strong style="color: #c53030;">{date2}</strong>' if home_stock_unavailable else f'<strong>{date2}</strong>'
     html += f"""
     <h1>美的仓储日报</h1>
     <div class="date-grid">
         <div class="date-card"><span>俊都仓储</span><strong>{date}</strong></div>
-        <div class="date-card"><span>家里库存</span><strong>{date2}</strong></div>
+        <div class="date-card"><span>家里库存</span>{date2_display}</div>
     </div>
     <h5>库存预警物料有 <strong>{len(colored_rows)}</strong> 款</h5>
     """
+    if home_stock_unavailable:
+        html += """
+        <p class="warn" style="background: #fff1f0; border: 1px solid #f3b5ae; color: #a61c00; font-weight: bold; padding: 10px 14px; border-radius: 6px; margin: 10px 22px;">
+            ⚠️ 特别提醒：本次未收到畅捷通家里库存邮件，家里库存暂未同步，俊都外仓数据已正常更新；排产与月计划缺口暂不计算。
+        </p>
+        """
     if auto_list_warning:
         html += f'<p class="warn">{auto_list_warning}</p>'
 
@@ -286,9 +299,12 @@ def construct_html_content(sheet, colored_rows, date, date2,
         expected = sheet.cell(row=row, column=11).value
         home_stock = sheet.cell(row=row, column=13).value
 
-        stock_fmt = f"{stock:,.1f}" if isinstance(stock, (int, float)) else stock
-        expected_fmt = f"{expected:,.1f}" if isinstance(expected, (int, float)) else expected
-        home_stock_fmt = f"{home_stock:,.1f}" if isinstance(home_stock, (int, float)) else home_stock
+        stock_fmt = f"{stock:,.1f}" if isinstance(stock, (int, float)) else (stock or "")
+        expected_fmt = f"{expected:,.1f}" if isinstance(expected, (int, float)) else (expected or "")
+        if home_stock_unavailable or home_stock is None or home_stock == "":
+            home_stock_fmt = '<span style="color: #a0aec0;">未同步</span>'
+        else:
+            home_stock_fmt = f"{home_stock:,.1f}" if isinstance(home_stock, (int, float)) else str(home_stock)
 
         html += f"""
         <tr>
@@ -307,12 +323,19 @@ def construct_html_content(sheet, colored_rows, date, date2,
     """
 
     def cell(label, value):
-        return f'<td class="left">{label}</td><td class="right">{value:,.1f}</td>'
+        val_str = f"{value:,.1f}" if isinstance(value, (int, float)) else str(value or "")
+        return f'<td class="left">{label}</td><td class="right">{val_str}</td>'
+
+    def cell_custom(label, display_html):
+        return f'<td class="left">{label}</td><td class="right">{display_html}</td>'
+
+    gap_display = f"{plan_gap_output:,.1f}" if (isinstance(plan_gap_output, (int, float)) and not home_stock_unavailable) else '<span style="color: #a0aec0;">无法计算</span>'
+    home_display = f"{home_stock_total:,.1f}" if (isinstance(home_stock_total, (int, float)) and not home_stock_unavailable) else '<span style="color: #a0aec0;">未同步</span>'
 
     html += "<tr>" + cell("出库", monthly_sent) + cell("月计划", monthly_plan) + "</tr>"
     html += "<tr>" + cell("入库", monthly_received) + cell("月计划预估还有要发货", monthly_remaining) + "</tr>"
-    html += "<tr>" + cell("外仓库存总量", stock_total) + cell("月计划缺口排产", plan_gap_output) + "</tr>"
-    html += "<tr>" + cell("家里库存总量", home_stock_total) + '<td class="left"></td><td class="right"></td></tr>'
+    html += "<tr>" + cell("外仓库存总量", stock_total) + cell_custom("月计划缺口排产", gap_display) + "</tr>"
+    html += "<tr>" + cell_custom("家里库存总量", home_display) + '<td class="left"></td><td class="right"></td></tr>'
 
     html += "</table></div>"
     if usage_sections:
@@ -347,7 +370,16 @@ def main(argv: list[str] | None = None) -> int:
     last_empty_row = find_last_empty_row(sheet)
     print(f"⚡ 发现 B 列第一个空单元格所在行: {last_empty_row}")
 
-    stock_total, monthly_plan, plan_gap_output, monthly_sent, monthly_received, monthly_remaining, home_stock_total = prepare_summary_text(sheet, last_empty_row)
+    home_stock_unavailable = (Path(inventory_folder) / ".home-stock-unavailable").exists()
+    if home_stock_unavailable:
+        if not date2:
+            date2 = "未同步（缺失）"
+        else:
+            date2 = f"{date2}（未更新）"
+
+    stock_total, monthly_plan, plan_gap_output, monthly_sent, monthly_received, monthly_remaining, home_stock_total = prepare_summary_text(
+        sheet, last_empty_row, home_stock_unavailable=home_stock_unavailable
+    )
     monthly_root_value = os.getenv("MONTHLY_ARCHIVE_DIR", "").strip()
     usage_sections = build_usage_sections(
         Path(inventory_folder),
@@ -360,7 +392,8 @@ def main(argv: list[str] | None = None) -> int:
     html_content = construct_html_content(
         sheet, colored_rows, date, date2,
         stock_total, monthly_plan, plan_gap_output,
-        monthly_sent, monthly_received, monthly_remaining, home_stock_total, usage_sections, auto_list_warning
+        monthly_sent, monthly_received, monthly_remaining, home_stock_total,
+        usage_sections, auto_list_warning, home_stock_unavailable=home_stock_unavailable
     )
 
     print("\n📋 HTML 已生成，预览内容省略…")
