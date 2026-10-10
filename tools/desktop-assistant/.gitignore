@@ -1,0 +1,5 @@
+# 本地配置文件（包含敏感凭据与账号，严禁提交到 Git）
+.env
+config.json
+__pycache__/
+*.pyc
