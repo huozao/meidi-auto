@@ -61,8 +61,31 @@ cp .env.example .env
 | :--- | :--- |
 | `meidi_console.py` | 控制台核心程序（包含 Tkinter 现代卡片 GUI 与 CLI 终端双模式） |
 | `meidi_console.pyw` | 纯 GUI 运行入口（Windows 原生静默启动，零控制台黑框） |
+| `sync_bitwarden.py` | Bitwarden Secrets Manager 云端凭据一键同步脚本 |
 | `install_shortcut.bat` | 一键桌面快捷方式安装器（跨电脑自动定位路径并绑定快捷键） |
 | `app_icon.ico` | 现代极简流光 “M” 多分辨率标准 Windows 图标 |
 | `app_icon.png` | 256×256 高清透明预览原图 |
 | `.env.example` | 环境变量配置模板 |
-| `.gitignore` | 本地凭据防泄漏规则（防止 `.env` 与 `config.json` 误提交） |
+| `.gitignore` | 本地凭据防泄漏规则（严格忽略 `.env`、`.bws_token`、`bws` 二进制等） |
+
+---
+
+## 四、 🤖 面向后续 AI 助手的操作指南 (AI Guidelines)
+
+后续任何 AI 会话（Codex / Claude / Antigravity / Cursor 等）进入本目录或处理桌面套件时，请遵循以下规范：
+
+1. **凭据获取原则（严禁向用户重复索要密码）**：
+   - 若发现本目录缺少 `.env` 文件，**不得**要求用户在聊天中粘贴明文邮箱或 Token。
+   - 优先检查本目录下是否存在 `.bws_token`（或系统环境变量 `BWS_ACCESS_TOKEN`）。若已存在，直接运行：
+     ```bash
+     python sync_bitwarden.py
+     ```
+     工具将通过 Bitwarden Secrets Manager（机器账户物理隔离）在 0.3 秒内自动拉取并写入合法的 `.env` 文件。
+
+2. **环境变量双向流转**：
+   - 云端权威位置：Bitwarden Secrets Manager（组织：`DevOps-Workspac`，项目：`meidi-auto`）。
+   - 本地修改如需持久化到云端，可直接调用 `sync_bitwarden.update_bws_secrets({"KEY": "VALUE"})`，或在控制台 GUI 中保存，控制台会自动异步更新云端。
+
+3. **安全与 Git 约束**：
+   - 严禁将 `.env`、`.bws_token`、`bws` 二进制提交至仓库。
+   - 如果新增业务所需的环境变量，请在 `.env.example` 中补充脱敏占位符，并在云端项目 `meidi-auto` 中同步创建该条目。

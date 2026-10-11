@@ -28,6 +28,21 @@ Gmail 收到「骏都对帐表」→ Cloud Run 命中关键词 → dispatch 本�
 - **凭据正本在 `infra/secrets/meidi-auto.enc.env`**（SOPS）。改那里不等于改生产——
   GitHub Secrets 没有读回接口，必须 `gh secret set` 推回才生效。
 
+## 环境变量与凭据流转（AI 必读）
+
+本仓具有两条清晰分立的凭据管理体系：
+
+1. **生产流水线凭据（GitHub Actions）**：
+   - 凭据正本在 `infra/secrets/meidi-auto.enc.env`（SOPS 加密）；
+   - 生产消费方为 GitHub Secrets（`EMAIL_ADDRESS_QQ`, `EMAIL_PASSWOR_QQ`, `RECIPIENT_EMAILS`）；
+   - 改动 SOPS 后需通过 `gh secret set` 推送生产生效。
+
+2. **桌面助手与本地开发凭据（Desktop Assistant / Local Dev）**：
+   - 凭据正本托管在 **Bitwarden Secrets Manager (BWS)**（组织：`DevOps-Workspac`，项目：`meidi-auto`）；
+   - **AI 获取凭据指引**：若本地或 Windows 桌面环境缺失 `.env`，**严禁要求用户手动粘贴明文凭据**。直接调用 `python tools/desktop-assistant/sync_bitwarden.py`（依赖本地已被 gitignore 保护的 `.bws_token` 与官方 `bws`/`bws.exe` 工具），0.3 秒内静默生成 `.env`；
+   - **双向同步机制**：控制台（`meidi_console.py` / `meidi_console.pyw`）修改配置并保存时，会自动异步调用 `bws secret edit` 回写云端；手机/网页端修改后，桌面端点击【🔄 同步 Bitwarden 凭据】即可拉取最新；
+   - **安全与隔离底线**：使用的服务账号为 Machine Account，仅拥有 `meidi-auto` 项目权限，**物理级无法触碰用户的个人密码库**（100% 隔离）。严禁将 `.env`、`.bws_token`、`bws` 二进制提交至 Git。
+
 ## 提交
 
 走 PR（`gh pr create --repo huozao/meidi-auto`）。合并到 main 不会自动部署，

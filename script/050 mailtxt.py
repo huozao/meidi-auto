@@ -153,6 +153,41 @@ def get_dates(sheet, meta_path=None):
     return date, date2
 
 
+def _is_same_day(dt_str: str | None, base_date_str: str | None = None) -> bool:
+    """
+    判断时间字符串中的日期是否为当天。
+    支持与当前北京时间对比，或者与基准邮件日期 (base_date_str) 对比。
+    若包含“未同步/缺失”等异常字样，直接判定为非当天。
+    """
+    if not dt_str:
+        return False
+    dt_str_clean = str(dt_str).strip()
+    if any(kw in dt_str_clean for kw in ("未同步", "缺失", "未更新")):
+        return False
+
+    m = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", dt_str_clean)
+    if not m:
+        return False
+
+    extracted_date = f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+
+    # 1. 优先与基准邮件日期对比（例如俊都仓储的日期）
+    if base_date_str:
+        bm = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", str(base_date_str).strip())
+        if bm:
+            base_date = f"{int(bm.group(1)):04d}-{int(bm.group(2)):02d}-{int(bm.group(3)):02d}"
+            return extracted_date == base_date
+
+    # 2. 与当前系统北京时间 (Asia/Shanghai) 对比
+    try:
+        from zoneinfo import ZoneInfo
+        today_sh = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
+    except Exception:
+        today_sh = datetime.now().strftime("%Y-%m-%d")
+
+    return extracted_date == today_sh
+
+
 # ================================
 # 查找 B 列第一个空单元格
 # ================================
@@ -228,6 +263,9 @@ def construct_html_content(sheet, colored_rows, date, date2,
             .date-card { flex: 0 0 auto; padding: 2px 0 2px 8px; border-left: 2px solid #c9dced; }
             .date-card span { color: #718096; font-size: 11px; }
             .date-card strong { margin-left: 4px; color: #526579; font-size: 12px; font-weight: 500; }
+            .date-card.outdated { border-left-color: #e53e3e; background: #fff5f5; border-radius: 4px; padding: 2px 6px 2px 8px; }
+            .date-card.outdated span { color: #e53e3e !important; font-weight: bold; }
+            .date-card.outdated strong { color: #e53e3e !important; font-weight: bold; }
             h2 { margin: 28px 0 8px; padding: 10px 14px; border-left: 5px solid #3b82c4; background: #e8f1fb; color: #173b63; font-size: 18px; }
             h5 { margin: 6px 22px 10px; color: #526579; font-size: 13px; font-weight: 500; }
             p { margin: 8px 22px; color: #5a6b7d; }
@@ -266,12 +304,37 @@ def construct_html_content(sheet, colored_rows, date, date2,
     """
 
     # 两个数据时间卡片：俊都仓储/家里库存分别对应两封来源邮件
-    date2_display = f'<strong style="color: #c53030;">{date2}</strong>' if home_stock_unavailable else f'<strong>{date2}</strong>'
+    # 若时间不是当天，整张卡片（标签文字与时间）醒目标红，明确提示用户数据不在今天
+    date1_is_today = _is_same_day(date)
+    date2_is_today = not home_stock_unavailable and _is_same_day(date2, base_date_str=date)
+
+    if date1_is_today:
+        date1_card = f'<div class="date-card"><span>俊都仓储</span><strong>{date}</strong></div>'
+    else:
+        date1_label = f"{date}（非当天新鲜日期）" if date and "非当天" not in str(date) else date
+        date1_card = (
+            f'<div class="date-card outdated" style="border-left: 2px solid #e53e3e; background: #fff5f5; border-radius: 4px; padding: 2px 6px 2px 8px;">'
+            f'<span style="color: #e53e3e; font-weight: bold;">俊都仓储</span>'
+            f'<strong style="color: #e53e3e; font-weight: bold;">{date1_label}</strong>'
+            f'</div>'
+        )
+
+    if date2_is_today:
+        date2_card = f'<div class="date-card"><span>家里库存</span><strong>{date2}</strong></div>'
+    else:
+        date2_label = f"{date2}（非当天新鲜日期）" if date2 and "非当天" not in str(date2) and "未同步" not in str(date2) else date2
+        date2_card = (
+            f'<div class="date-card outdated" style="border-left: 2px solid #e53e3e; background: #fff5f5; border-radius: 4px; padding: 2px 6px 2px 8px;">'
+            f'<span style="color: #e53e3e; font-weight: bold;">家里库存</span>'
+            f'<strong style="color: #e53e3e; font-weight: bold;">{date2_label}</strong>'
+            f'</div>'
+        )
+
     html += f"""
     <h1>美的仓储日报</h1>
     <div class="date-grid">
-        <div class="date-card"><span>俊都仓储</span><strong>{date}</strong></div>
-        <div class="date-card"><span>家里库存</span>{date2_display}</div>
+        {date1_card}
+        {date2_card}
     </div>
     <h5>库存预警物料有 <strong>{len(colored_rows)}</strong> 款</h5>
     """

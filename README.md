@@ -283,8 +283,12 @@ python main.py --dry-run
 
 - `EMAIL_ADDRESS_QQ`
 - `EMAIL_PASSWORD_QQ`（兼容历史变量 `EMAIL_PASSWOR_QQ`）
-- `RECIPIENT_EMAILS`（必需，例：`a@example.com,b@example.com`）
 - `IMAP_SERVER`（可选，默认 `imap.qq.com`）
+
+### 凭据获取与同步说明
+
+- **CI/CD 生产环境**：由 GitHub Actions 自动注入生产密钥。正本维护在 `infra/secrets/meidi-auto.enc.env`（SOPS 加密）。
+- **桌面助手与本地开发**：统一托管于 **Bitwarden Secrets Manager**（项目：`meidi-auto`）。本地执行 `python tools/desktop-assistant/sync_bitwarden.py` 即可秒级拉取生成 `.env`，桌面控制台支持双向热重载。
 
 ## 月末邮件与物料汇总
 

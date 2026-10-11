@@ -48,6 +48,32 @@ class MailDateHtmlTests(unittest.TestCase):
                 ("2026-09-18 10:11:12", "2026-09-18 13:14:15"),
             )
 
+    def test_outdated_home_stock_is_styled_red(self):
+        wb = openpyxl.Workbook()
+        sheet = wb.active
+        # 俊都仓储为 10-10，家里库存停留在 09-30
+        date = "2026-10-10 21:06:25"
+        date2 = "2026-09-30 18:00:05"
+
+        html = MAILTXT.construct_html_content(
+            sheet, [], date, date2, 0, 0, 0, 0, 0, 0, 0
+        )
+
+        # 家里库存卡片应该有醒目的红色字体、outdated 警示样式及非当天新鲜日期标注
+        self.assertIn("2026-09-30 18:00:05", html)
+        self.assertIn('class="date-card outdated"', html)
+        self.assertIn('<span style="color: #e53e3e; font-weight: bold;">家里库存</span>', html)
+        self.assertIn('<strong style="color: #e53e3e; font-weight: bold;">2026-09-30 18:00:05（非当天新鲜日期）</strong>', html)
+
+    def test_is_same_day_helper(self):
+        # 相同日期
+        self.assertTrue(MAILTXT._is_same_day("2026-10-10 18:00:00", base_date_str="2026-10-10 21:00:00"))
+        # 跨天不同日期
+        self.assertFalse(MAILTXT._is_same_day("2026-09-30 18:00:05", base_date_str="2026-10-10 21:00:00"))
+        # 异常缺失状态
+        self.assertFalse(MAILTXT._is_same_day("未同步（缺失）", base_date_str="2026-10-10 21:00:00"))
+        self.assertFalse(MAILTXT._is_same_day(None))
+
 
 if __name__ == "__main__":
     unittest.main()

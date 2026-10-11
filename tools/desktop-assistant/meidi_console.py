@@ -394,19 +394,33 @@ class AssistantGUI:
         )
         btn3.grid(row=1, column=0, padx=8, pady=4, sticky="nsew")
 
+        btn_sync = tk.Button(
+            action_frame,
+            text="🔄 同步 Bitwarden 凭据\n(云端环境变量秒级更新)",
+            font=("Microsoft YaHei", 9),
+            bg="#ebf8ff",
+            fg="#2b6cb0",
+            relief="groove",
+            bd=1,
+            cursor="hand2",
+            pady=3,
+            command=self.start_sync_thread
+        )
+        btn_sync.grid(row=1, column=1, padx=8, pady=4, sticky="nsew")
+
         btn4 = tk.Button(
             action_frame,
-            text="⚙️ 配置与使用说明",
+            text="⚙️ 本地配置与状态说明",
             font=("Microsoft YaHei", 9),
             bg="#edf2f7",
             fg="#4a5568",
             relief="groove",
             bd=1,
             cursor="hand2",
-            pady=5,
+            pady=4,
             command=self.show_config_dialog
         )
-        btn4.grid(row=1, column=1, padx=8, pady=4, sticky="nsew")
+        btn4.grid(row=2, column=0, columnspan=2, padx=8, pady=4, sticky="nsew")
 
         action_frame.columnconfigure(0, weight=1)
         action_frame.columnconfigure(1, weight=1)
@@ -524,6 +538,28 @@ class AssistantGUI:
 
         threading.Thread(target=_do_open, daemon=True).start()
 
+    def start_sync_thread(self):
+        self.log("----------------------------------------")
+        self.log("🔒 开始从 Bitwarden Secrets Manager 同步最新凭据...")
+        t = threading.Thread(target=self._run_sync, daemon=True)
+        t.start()
+
+    def _run_sync(self):
+        try:
+            import importlib
+            import sync_bitwarden
+            importlib.reload(sync_bitwarden)
+            ok = sync_bitwarden.sync_from_bws(log_func=self.log)
+            if ok:
+                self.config = load_env_or_config()
+                self.root.after(0, lambda: self.status_lbl.configure(
+                    text=f"状态: Bitwarden 凭据已重载 | 仓库: {self.config.get('GITHUB_REPO')}"
+                ))
+                self.log("🎉 本地凭据与环境变量已热重载生效！")
+        except Exception as e:
+            self.log(f"❌ 同步异常: {e}")
+        self.log("----------------------------------------")
+
     def show_config_dialog(self):
         diag = tk.Toplevel(self.root)
         diag.title("⚙️ 配置与说明")
@@ -581,11 +617,58 @@ class AssistantGUI:
         email_entry.grid(row=5, column=0, sticky="w", pady=(0, 8))
 
         def save_and_close():
-            self.config["GITHUB_TOKEN"] = token_entry.get().strip()
-            self.config["SAVE_DIR"] = dir_entry.get().strip()
-            self.config["QQ_EMAIL"] = email_entry.get().strip()
+            new_token = token_entry.get().strip()
+            new_dir = dir_entry.get().strip()
+            new_email = email_entry.get().strip()
+
+            updates = {}
+            if new_token != self.config.get("GITHUB_TOKEN"):
+                updates["GITHUB_TOKEN"] = new_token
+            if new_dir != self.config.get("SAVE_DIR"):
+                updates["SAVE_DIR"] = new_dir
+            if new_email != self.config.get("QQ_EMAIL"):
+                updates["QQ_EMAIL"] = new_email
+
+            self.config["GITHUB_TOKEN"] = new_token
+            self.config["SAVE_DIR"] = new_dir
+            self.config["QQ_EMAIL"] = new_email
             save_config(self.config)
-            messagebox.showinfo("成功", "配置已成功保存！", parent=diag)
+
+            # 实时更新本地 .env
+            env_file = BASE_DIR / ".env"
+            try:
+                env_lines = []
+                existing_keys = set()
+                if env_file.exists():
+                    for line in env_file.read_text(encoding="utf-8").splitlines():
+                        if "=" in line and not line.strip().startswith("#"):
+                            k = line.split("=", 1)[0].strip()
+                            existing_keys.add(k)
+                            if k in self.config:
+                                env_lines.append(f'{k}="{self.config[k]}"')
+                            else:
+                                env_lines.append(line)
+                        else:
+                            env_lines.append(line)
+                for k, v in self.config.items():
+                    if k not in existing_keys and k in ("QQ_EMAIL", "QQ_AUTH_CODE", "SAVE_DIR", "GITHUB_TOKEN"):
+                        env_lines.append(f'{k}="{v}"')
+                env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+            except Exception as e:
+                self.log(f"⚠️ 更新本地 .env 失败: {e}")
+
+            # 若有改动，后台自动推送到 Bitwarden 云端统一
+            if updates:
+                self.log(f"☁️ 检测到配置修改: {list(updates.keys())}，正在同步至 Bitwarden...")
+                def _push_bg():
+                    try:
+                        import sync_bitwarden
+                        sync_bitwarden.update_bws_secrets(updates, log_func=self.log)
+                    except Exception as err:
+                        self.log(f"⚠️ 云端同步异常: {err}")
+                threading.Thread(target=_push_bg, daemon=True).start()
+
+            messagebox.showinfo("成功", "配置已成功保存！变动项已自动同步至 Bitwarden 云端。", parent=diag)
             self.status_lbl.configure(text=f"状态: 配置已更新 | 仓库: {self.config.get('GITHUB_REPO')}")
             diag.destroy()
 

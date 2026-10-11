@@ -1,6 +1,6 @@
 # 美的库存自动化：当前交接状态
 
-> 更新日期：2026-10-09。新会话处理本项目时先读本文，再按需阅读
+> 更新日期：2026-10-11。新会话处理本项目时先读本文，再按需阅读
 > `README.md`、`docs/PIPELINE_FLOW.md` 和 `docs/MONTHLY_SUMMARY_SPEC.md`。
 
 本文的 SHA、运行记录与资源缺口是上述日期的交接快照，后续线上状态需重新取证。
@@ -9,8 +9,11 @@
 ## 代码、数据与执行边界
 
 - **唯一代码源**：GitHub 仓库 `huozao/meidi-auto` 的 `main`。WSL 工作目录只作为开发、排查和本地验证副本；不得以本地未推送代码作为生产版本。
-- **当前上线基线**：`f5a1379808a6683b04ea2ab859296ac5a7a00ef6`（GitHub `main`，2026-09-19）。该提交包含 PR #14 的库存两周均值与邮件收件时间改动；GitHub `main` 是生产唯一代码源。
+- **当前上线基线**：`5c6a3aae7d30cdd99cb618d0ce973ebe25dbe6e9`（GitHub `main`，2026-10-09，支持家里库存缺失降级）。
 - **业务数据不入 Git**：邮件附件、月末快照、Excel/HTML 报告和坚果云同步文件均是运行数据；邮箱与 WebDAV 凭据只存在 WSL `.env` 或 GitHub Actions Secrets。
+- **凭据双轨体系**：
+  1. **生产流水线**：正本在 `infra/secrets/meidi-auto.enc.env`（SOPS），由 GitHub Secrets 消费；
+  2. **桌面助手与本地开发**：托管在 Bitwarden Secrets Manager（组织 `DevOps-Workspac`，项目 `meidi-auto`），通过 `tools/desktop-assistant/sync_bitwarden.py` 与 `.bws_token` 免密双向同步，100% 物理隔离个人密码库。
 - **数据留存**：每日附件归档到 `NUTSTORE_REMOTE_DAILY_ARCHIVE_DIR/YYYYMM/`；月度快照、报告、当前自动清单和按月副本归入 `NUTSTORE_REMOTE_MONTHLY_ARCHIVE_DIR`。Windows 坚果云同步目录与 WebDAV 是同一业务留存体系，但不是代码源。
 
 ## 当前触发与验收
@@ -18,9 +21,27 @@
 ### 每日日报
 
 - 工作流：`Run MeidiAuto Pipeline`（`.github/workflows/run-daily.yml`）。仅保留 `workflow_dispatch`，没有 GitHub cron。
-- 正常自动链路：Gmail Watch -> Pub/Sub -> `gmail-watcher` Cloud Run -> GitHub `workflow_dispatch` -> 本仓工作流；人工复核也可以在 Actions 页面或用 `gh workflow run` 手动发起。
-- 最近实测：运行 `34844719311`（2026-09-14，使用 SHA `69ea637`），耗时 76.79 秒；读取当日文件 `总库存20260914_204108.xlsx`，生成 HTML，日志出现“邮件发送成功”（配置收件人数 3），并完成坚果云 3 个文件归档。artifact `run-report.json` 为 `success: true` 且 `failed_steps: []`。该记录证明发送端成功，不等同于收件人已读或已收到。
+- 正常自动链路：Gmail Watch -> Pub/Sub -> `gmail-watcher` Cloud Run -> GitHub `workflow_dispatch` -> 本仓工作流；人工复核也可以在 Actions 页面、桌面助手或用 `gh workflow run` 手动发起。
+- 最近实测：运行 `38054540852`（2026-10-10 21:07 北京时间），总耗时 62.28 秒；读取当日外仓骏都对账表，生成 HTML，日志出现“邮件发送成功”（配置收件人数 3），并完成坚果云 3 个文件归档。artifact `run-report.json` 为 `success: true` 且 `failed_steps: []`。
 - **验收不能只看 Actions 绿灯**：该工作流对仅 `020 Email download.py` 失败存在软失败放行。必须同时检查 artifact 的 `run-report.json`、`failed_steps` 以及日志中的“邮件发送成功”。
+
+### 2026-10-11 非当天邮件红字告警与新鲜度标注交付
+
+- 业务背景：长假或畅捷通故障跨天时，收件箱残留放假前旧邮件（如 9月30日旧数据），业务默认不阻断出库核算，但必须在正文视觉上强烈警示用户数据跨天。
+- `script/050 mailtxt.py`：
+  - 新增 `_is_same_day` 智能时效校验器，支持北京时间当前日与俊都基准日双重校验；
+  - 非当天数据卡片整体施加左侧红条（`2px solid #e53e3e`）与浅粉底色（`#fff5f5`）；
+  - 标签【家里库存】与时间全部以醒目粗体红色高亮展示；
+  - 自动在时间后缀追加 `（非当天新鲜日期）` 醒目标注；
+- `tests/test_mailtxt.py`：新增 `test_outdated_home_stock_is_styled_red` 与 `test_is_same_day_helper`，全套 22 项测试全绿。
+
+### 2026-10-10 桌面助手套件与 Bitwarden Secrets Manager 凭据双向闭环交付
+
+- 源码收编于 `tools/desktop-assistant/`，包含现代 Fluent 极简流光 M 图标、一键快捷方式安装器 `install_shortcut.bat`、零控制台黑框运行入口 `meidi_console.pyw`；
+- 界面集成：一键下载邮件并按月归档、一键触发生产流水线、毫秒级秒开当月文件夹；
+- 新增 `sync_bitwarden.py`：基于 Bitwarden 官方 `bws` 引擎，0.3 秒无感拉取/回写环境变量；
+- 界面控制台实现双向热重载：本地修改保存自动异步推送到云端，网页/手机端修改后一键拉回；
+- 完善三级 AI 引导规范体系（顶层 `AGENTS.md`、子仓 `AGENTS.md`、`README.md` 与桌面说明），严禁新会话 AI 向用户索要明文凭据。
 
 ### 2026-10-09 缺家里库存降级机制交付
 
