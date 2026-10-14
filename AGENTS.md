@@ -1,32 +1,40 @@
 # meidi-auto
 
-美的存量对帐流水线。**每天在生产运行**，由 [`gmail-watcher`](../gmail-watcher/) 触发：
-Gmail 收到「骏都对帐表」→ Cloud Run 命中关键词 → dispatch 本仓 `run-daily.yml`
-→ 下载邮件、合并 Excel、着色计算、生成图与正文、发信给三个收件人。
+美的存量对帐流水线：下载邮件、处理 Excel、生成日报、发送邮件并归档。
+本文件适用于独立 clone；父工作区存在时再读其跨仓规则，缺少工作区不阻断本地任务。
 
-先读 `README.md`（含运行方式、必需环境变量、历史工具的去向）和
-`docs/PIPELINE_FLOW.md`（主流程一页图）。
+## 先读与代码入口
 
-## 动手前必须知道的
+- [README.md](README.md)：安装、无业务副作用的检查、执行边界。
+- [docs/CURRENT_HANDOFF.md](docs/CURRENT_HANDOFF.md)：已确认口径、带日期的运行证据与待验证项。
+- [docs/PIPELINE_FLOW.md](docs/PIPELINE_FLOW.md)：主流程；步骤与输入输出契约在 `pipeline/steps.py`、`pipeline/validators.py`。
+- `main.py` 负责参数与编排，`script/` 执行业务，`tools/monthly_summary.py` 承载独立月度工具。
+- 月度口径见 [docs/MONTHLY_SUMMARY_SPEC.md](docs/MONTHLY_SUMMARY_SPEC.md)，本地调试见 [docs/development.md](docs/development.md)。
 
-- **改动前先看今天跑没跑**。`gh run list --repo huozao/meidi-auto --limit 3`。
-  正常每天一次，由 Gmail 事件驱动，不是固定 cron。
+## 业务与授权边界
 
-- **`Actions 绿灯 ≠ 业务跑通`**。`run-daily.yml` 有一条「仅 `020 Email download.py`
-  失败时记为软失败并放行」的分支，命中它时 run 依然是 success。判据要落在
-  artifact 里 `run-report.json` 的 `failed_steps`，以及日志里有没有
-  `✅ 邮件发送成功`——不是 run 的 conclusion。
+- `main.py` 默认完整运行、`--only-step` 和手动 dispatch 都可能真实读邮箱、发信或写 WebDAV；独立数据目录不隔离真实账户。真实联调、发信、归档与清理必须在用户明确授权范围内。
+- 影响线上运行或准备真实联调时，先只读检查近期 Actions，避免重复处理；纯本地文档/单元测试无需访问 GitHub 或生产。
+- 日报由 `run-daily.yml` 的 `workflow_dispatch` 触发。Actions success 不能证明业务完成：IMAP 不可达可跳过，仅 020 失败可软失败放行。检查报告的 `success`、`skipped`、`failed_steps`、邮件发送日志；用户确认收到强于发送成功日志。
+- `RECIPIENT_EMAILS` 来自配置，不凭历史收件人数推断现值；密码兼容 `EMAIL_PASSWORD_QQ` / `EMAIL_PASSWOR_QQ`。不得擅改收件人或凭据。
+- 邮件、附件、Excel/HTML、月末快照、同步文件、`.env` 与日志不入 Git。工作区部署的凭据管理按其 SOPS 规则，独立 clone 使用自行保管的本地配置。
+- 未经明确授权不 commit、push、merge、创建 PR、修改 Secrets 或其他远程资源。获授权交付时走 PR；main 更新后下一次工作流会执行新代码。文档里的交付流程不等于授权。
 
-- **收件人在 `RECIPIENT_EMAILS` 这个 secret 里，不在代码里**。2026-09-08 收编
-  新架构时才从硬编码改过来，生产值是三个地址。⚠️ 历史上 `MeidiAuto2` 那份
-  `.env` 里只有一个地址（开发自测用），照抄会**静默少发两个人**，不报任何错。
+## 最小验证与维护
 
-- **密码 secret 的名字是 `EMAIL_PASSWOR_QQ`**（历史误拼，少一个 D）。代码
-  `os.getenv("EMAIL_PASSWORD_QQ") or os.getenv("EMAIL_PASSWOR_QQ")` 两个都读，
-  改 secret 名之前先确认两边都改。
+从仓库根目录使用安装了 `requirements.txt` 的 Python：
 
-- **凭据正本在 `infra/secrets/meidi-auto.enc.env`**（SOPS）。改那里不等于改生产——
-  GitHub Secrets 没有读回接口，必须 `gh secret set` 推回才生效。
+```bash
+python main.py --list-steps
+python main.py --dry-run
+python main.py --check
+python tools/generate_module_catalog.py --check
+git diff --check
+```
+
+`--check` 缺少环境变量只告警，返回 0 不能证明凭据完整或邮箱可用。
+改代码追加受影响测试（现有入口：`python -m unittest discover -s tests -v`）。
+纯文档改动验证链接、命令即可，不要求完整实跑。
 
 ## 环境变量与凭据流转（AI 必读）
 
@@ -45,10 +53,6 @@ Gmail 收到「骏都对帐表」→ Cloud Run 命中关键词 → dispatch 本�
 
 ## 提交
 
-走 PR（`gh pr create --repo huozao/meidi-auto`）。合并到 main 不会自动部署，
-本仓没有部署概念——下次被 dispatch 时就跑新代码。
-
-想验证改动，用 `gh workflow run run-daily.yml --repo huozao/meidi-auto --ref <分支>`
-在分支上实跑一次；**它会真的发邮件**，验完记得说明。
-
-工作区级规矩见顶层 [`AGENTS.md`](../AGENTS.md)。
+业务行为、步骤、输入输出或验收方式变化时，同批更新受影响的现有契约、STEP CARD
+与导航；新功能按需要补最小文档，无影响不制造记录。历史证据标明日期，
+待验证不得写成线上事实，旧评分/迁移讨论不覆盖当前源码。
