@@ -41,7 +41,7 @@ Gmail 收到「骏都对帐表」→ Cloud Run 命中关键词 → dispatch 本�
    - 凭据正本托管在 **Bitwarden Secrets Manager (BWS)**（组织：`DevOps-Workspac`，项目：`meidi-auto`）；
    - **AI 获取凭据指引**：若本地或 Windows 桌面环境缺失 `.env`，**严禁要求用户手动粘贴明文凭据**。直接调用 `python tools/desktop-assistant/sync_bitwarden.py`（依赖本地已被 gitignore 保护的 `.bws_token` 与官方 `bws`/`bws.exe` 工具），0.3 秒内静默生成 `.env`；
    - **双向同步机制**：控制台（`meidi_console.py` / `meidi_console.pyw`）修改配置并保存时，会自动异步调用 `bws secret edit` 回写云端；手机/网页端修改后，桌面端点击【🔄 同步 Bitwarden 凭据】即可拉取最新；
-   - **安全与隔离底线**：使用的服务账号为 Machine Account，仅拥有 `meidi-auto` 项目权限，**物理级无法触碰用户的个人密码库**（100% 隔离）。严禁将 `.env`、`.bws_token`、`bws` 二进制提交至 Git。
+   - **安全与隔离底线**：使用的服务账号为 AI 专用 Machine Account，可访问本项目与通用账号本 `accounts`（同一令牌也在 `~/.config/bws/.bws_token`），**物理级无法触碰用户的个人密码库**。注意：同步脚本只写 `tools/desktop-assistant/.env`；仓库根 `.env` 是主程序配置，不由 BWS 生成。严禁将 `.env`、`.bws_token`、`bws` 二进制提交至 Git。
 
 ## 提交
 
