@@ -107,5 +107,5 @@ gh run download <run-id> --repo huozao/meidi-auto --name pipeline-run-report
 ## 当前工作区边界（2026-09-19）
 
 - GitHub `main` 的 SHA 必须在每次接手时用 `git ls-remote origin refs/heads/main` 实时核对；本次已确认 PR #14、#15、#16 均已合并，生产运行 `35421736354` 已完成。不要把本地副本当作生产代码源。
-- 原始工作区仍保留一组未提交的既有指导/历史文档改动：`AGENTS.md`、`README.md`、`CLAUDE.md`、`docs/development.md`、`docs/migrations/`，以及本次早期开发副本的业务文件改动。它们未进入 PR #14，也未进入 GitHub `main`；不得 reset、clean 或未经核对混入后续提交。若后续需要交付这些文档，必须单独审阅并走 PR。
+- 原始工作区那组 09-13 指导/历史文档改动（`AGENTS.md`、`README.md`、`CLAUDE.md`、`docs/development.md`、`docs/migrations/`）已于 2026-10-14 单独三方合并到分支 `docs/guidance-20260913`，冲突处保留 main 现行内容，待走 PR。原始工作区里这些文件的未提交副本在该 PR 合并前不要 reset、clean 或混入其他提交。
 - 生产 artifact 仅保留 `pipeline-run-report`；Excel、HTML、邮件附件和 WebDAV 文件是运行时业务数据，不入 Git。发送日志不能替代收件人实际收到的证明。
