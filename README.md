@@ -38,10 +38,10 @@ python main.py --dry-run
 
 ## 月末邮件与物料汇总
 
-月度汇总已迁移到 WSL 中的 `tools/monthly_summary.py`，设计和数据边界见
-[`docs/MONTHLY_SUMMARY_SPEC.md`](docs/MONTHLY_SUMMARY_SPEC.md)。它不加入每日
-`main.py` 生产步骤，默认按指定月份选择最后一天 24:00 前最新的
-“物料情况和Excel文件”邮件，保存月末快照，再扫描历史月末文件并输出物料分析 Excel。
+月度汇总已迁移到 WSL 中的 `tools/monthly_summary.py` 与月初核验工具 `tools/monthly_closeout.py`，
+设计和数据边界见 [`docs/MONTHLY_SUMMARY_SPEC.md`](docs/MONTHLY_SUMMARY_SPEC.md)。它不加入每日
+`main.py` 生产步骤。月末快照正本以每日流水线在月末最后一天处理后生成的最终总库存主文件（`总库存*.xlsx`）为准，
+确保包含家里库存、月计划、外应存及累计出入库总量等下游必需指标；同时支持 IMAP 邮件审计溯源。
 工作簿是否为合格月末表，以 `库存表` 表头上方是否包含目标月份最后一天（如
 `2026年08月31日`）为主判据；当天没有出入库流水只作辅助提示。
 报告还会根据 `出入库明细表` 的“备注”统一公司名称，输出公司月度/年度领用物料、
