@@ -10,7 +10,7 @@ concurrency:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
 
@@ -24,8 +24,18 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-renderer-${{ runner.os }}-libreoffice-calc
+
       - name: Install Excel preview renderer
+        timeout-minutes: 6
         run: |
+          echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4
+          echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99force-ipv4
+          echo 'Acquire::Retries "3";' | sudo tee -a /etc/apt/apt.conf.d/99force-ipv4
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libreoffice-calc fonts-noto-cjk poppler-utils
 

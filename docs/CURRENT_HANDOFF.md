@@ -1,6 +1,6 @@
 # 美的库存自动化：当前交接状态
 
-> 更新日期：2026-11-18。新会话处理本项目时先读本文，再按需阅读
+> 更新日期：2026-11-19。新会话处理本项目时先读本文，再按需阅读
 > `README.md`、`docs/PIPELINE_FLOW.md` 和 `docs/MONTHLY_SUMMARY_SPEC.md`。
 
 本文的 SHA、运行记录与资源缺口是上述日期的交接快照，后续线上状态需重新取证。
@@ -9,7 +9,7 @@
 ## 代码、数据与执行边界
 
 - **唯一代码源**：GitHub 仓库 `huozao/meidi-auto` 的 `main`。WSL 工作目录只作为开发、排查和本地验证副本；不得以本地未推送代码作为生产版本。
-- **当前上线基线**：`5c6a3aae7d30cdd99cb618d0ce973ebe25dbe6e9`（GitHub `main`，2026-10-09，支持家里库存缺失降级）。
+- **当前上线基线**：`8dcc79283f4581b4fa14957eb9701a4e1e65b3d8`（GitHub `main`，2026-11-18，统一月末快照源并补录 9/10 月出库数据）。
 - **业务数据不入 Git**：邮件附件、月末快照、Excel/HTML 报告和坚果云同步文件均是运行数据；邮箱与 WebDAV 凭据只存在 WSL `.env` 或 GitHub Actions Secrets。
 - **凭据双轨体系**：
   1. **生产流水线**：正本在 `infra/secrets/meidi-auto.enc.env`（SOPS），由 GitHub Secrets 消费；
@@ -24,6 +24,19 @@
 - 正常自动链路：Gmail Watch -> Pub/Sub -> `gmail-watcher` Cloud Run -> GitHub `workflow_dispatch` -> 本仓工作流；人工复核也可以在 Actions 页面、桌面助手或用 `gh workflow run` 手动发起。
 - 最近实测：运行 `38054540852`（2026-10-10 21:07 北京时间），总耗时 62.28 秒；读取当日外仓骏都对账表，生成 HTML，日志出现“邮件发送成功”（配置收件人数 3），并完成坚果云 3 个文件归档。artifact `run-report.json` 为 `success: true` 且 `failed_steps: []`。
 - **验收不能只看 Actions 绿灯**：该工作流对仅 `020 Email download.py` 失败存在软失败放行。必须同时检查 artifact 的 `run-report.json`、`failed_steps` 以及日志中的“邮件发送成功”。
+
+### 2026-11-19 CI 依赖安装抗限速与 APT 缓存优化交付
+
+- **业务背景**：2026-11-18 晚间 `run-daily.yml` 运行（Run `44310542649`）在 `Install Excel preview renderer` 步骤遭遇 Ubuntu 官方 AWS EC2 镜像源严重限速（几 KB/s），耗时 29 分钟卡死并触发 GitHub Actions 30 分钟 Job 超时取消。排查发现历史 11-05、11-06 亦发生过同类现象（历史发生率约 7.5%）。
+- **根因定位**：
+  1. GitHub-hosted runner 到 `us-east-2.ec2.archive.ubuntu.com` 的 IPv6 路由/握手经常受阻或单包卡顿；
+  2. APT 默认配置没有设置单包超时（Timeout）和重试次数（Retries），遇坏节点会无限期挂起；
+  3. `Install Excel preview renderer` 步骤缺少独立的步骤级 `timeout-minutes` 保护；
+  4. 每次运行均从外部网络重新下载 `libreoffice-calc fonts-noto-cjk poppler-utils`（近 100MB），未利用 GitHub Actions 的包缓存。
+- **实施优化**（修改 `.github/workflows/run-daily.yml`）：
+  1. 引入 `actions/cache@v4` 缓存 `/var/cache/apt/archives`（键 `apt-renderer-${{ runner.os }}-libreoffice-calc`），命中缓存时直接从 GitHub 存储恢复 deb 包，下载耗时降为秒级；
+  2. 针对网络层增加 APT 防护：注入 `Acquire::ForceIPv4 "true";`、`Acquire::http::Timeout "20";` 与 `Acquire::Retries "3";`，遇到慢节点 20 秒断开快速重试；
+  3. 增加步骤级限时 `timeout-minutes: 6`，并适度放宽 Job 级超时至 `timeout-minutes: 40`，保证极端重试或大包下载时后续业务步骤有充足时间执行。
 
 ### 2026-11-18 月末归档口径统一与出库趋势缺失修复交付
 
