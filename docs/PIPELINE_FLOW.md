@@ -1,8 +1,32 @@
 # 流程图（给维护者的 1 分钟导览）
 
-> 目的：降低“步骤变多后不易理解”的阅读成本。
+> 目的：降低“步骤变多后不易理解”的阅读成本，帮助新会话快速掌握全局拓扑与步骤流转。
 
-## 总览（Mermaid）
+## 系统全局拓扑（从邮件到达至坚果云归档）
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Supplier as 外仓/ERP/财务
+  participant Mail as QQ/网易/Gmail邮箱
+  participant GCP as GCP Cloud Run (gmail-watcher)
+  participant GHA as GitHub Actions (run-daily.yml)
+  participant Nutstore as 坚果云 (WebDAV)
+  actor Recipient as 内部管理/业务收件人
+
+  Supplier->>Mail: 每天傍晚发送对账邮件与附件
+  Mail->>GCP: Gmail Watch / PubSub 捕获新邮件事件
+  GCP->>GHA: 触发 workflow_dispatch (通过 GitHub API)
+  Note over GHA: 启动 Ubuntu Runner 执行流水线
+  GHA->>Mail: 020 步骤连接 IMAP 下载附件
+  Note over GHA: 021~050 数据处理、Excel渲染、HTML正文构建
+  GHA->>Nutstore: 050 步骤拉取历史月末快照 (出库趋势分析)
+  GHA->>Mail: 051 步骤通过 SMTP 发送日报邮件
+  Mail->>Recipient: 送达带 Excel 预览图的日报
+  GHA->>Nutstore: 052 步骤归档当日附件与总库存至 WebDAV
+```
+
+## 核心流水线步骤总览（Mermaid）
 
 ```mermaid
 flowchart LR

@@ -9,7 +9,7 @@
 ## 代码、数据与执行边界
 
 - **唯一代码源**：GitHub 仓库 `huozao/meidi-auto` 的 `main`。WSL 工作目录只作为开发、排查和本地验证副本；不得以本地未推送代码作为生产版本。
-- **当前上线基线**：`e19935e23973fa5d33648c17badb3c65ba1df9a0`（GitHub `main`，2026-11-19，CI 切换 Azure 镜像源与 APT 缓存优化）。
+- **当前上线基线**：`2c50fbb29e869f9cf3a3f789db77b64684bb6433`（GitHub `main`，2026-11-19，CI 切换 Azure 镜像源与 APT 缓存优化）。
 - **业务数据不入 Git**：邮件附件、月末快照、Excel/HTML 报告和坚果云同步文件均是运行数据；邮箱与 WebDAV 凭据只存在 WSL `.env` 或 GitHub Actions Secrets。
 - **凭据双轨体系**：
   1. **生产流水线**：正本在 `infra/secrets/meidi-auto.enc.env`（SOPS），由 GitHub Secrets 消费；
@@ -22,7 +22,7 @@
 
 - 工作流：`Run MeidiAuto Pipeline`（`.github/workflows/run-daily.yml`）。仅保留 `workflow_dispatch`，没有 GitHub cron。
 - 正常自动链路：Gmail Watch -> Pub/Sub -> `gmail-watcher` Cloud Run -> GitHub `workflow_dispatch` -> 本仓工作流；人工复核也可以在 Actions 页面、桌面助手或用 `gh workflow run` 手动发起。
-- 最近实测：运行 `38054540852`（2026-10-10 21:07 北京时间），总耗时 62.28 秒；读取当日外仓骏都对账表，生成 HTML，日志出现“邮件发送成功”（配置收件人数 3），并完成坚果云 3 个文件归档。artifact `run-report.json` 为 `success: true` 且 `failed_steps: []`。
+- 最近实测：运行 `44440188708`（2026-11-19 09:55 北京时间），总耗时 1 分 59 秒；成功下载外仓骏都对账表，生成 HTML 与 Excel 预览图，日志出现“邮件发送成功”（配置收件人数 3，主题《【⚠️缺家里库存】美的库存及出入库日报｜2026-11-18｜库存、出入库及月计划》），并完成坚果云 3 个文件归档。artifact `run-report.json` 为 `success: true` 且 `failed_steps: []`。物料出库趋势顺利恢复展示 9 月与 10 月数据。
 - **验收不能只看 Actions 绿灯**：该工作流对仅 `020 Email download.py` 失败存在软失败放行。必须同时检查 artifact 的 `run-report.json`、`failed_steps` 以及日志中的“邮件发送成功”。
 
 ### 2026-11-19 CI 依赖安装抗限速与 APT 缓存优化交付
