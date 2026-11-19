@@ -9,7 +9,7 @@
 ## 代码、数据与执行边界
 
 - **唯一代码源**：GitHub 仓库 `huozao/meidi-auto` 的 `main`。WSL 工作目录只作为开发、排查和本地验证副本；不得以本地未推送代码作为生产版本。
-- **当前上线基线**：`8dcc79283f4581b4fa14957eb9701a4e1e65b3d8`（GitHub `main`，2026-11-18，统一月末快照源并补录 9/10 月出库数据）。
+- **当前上线基线**：`e19935e23973fa5d33648c17badb3c65ba1df9a0`（GitHub `main`，2026-11-19，CI 切换 Azure 镜像源与 APT 缓存优化）。
 - **业务数据不入 Git**：邮件附件、月末快照、Excel/HTML 报告和坚果云同步文件均是运行数据；邮箱与 WebDAV 凭据只存在 WSL `.env` 或 GitHub Actions Secrets。
 - **凭据双轨体系**：
   1. **生产流水线**：正本在 `infra/secrets/meidi-auto.enc.env`（SOPS），由 GitHub Secrets 消费；
@@ -38,6 +38,10 @@
   2. 针对网络层增加 APT 防护：注入 `Acquire::ForceIPv4 "true";`、`Acquire::http::Timeout "20";` 与 `Acquire::Retries "3";`，遇到慢节点 20 秒断开快速重试；
   3. 彻底换掉经常抽风限速的 EC2 镜像源：在安装前自动将 `/etc/apt/apt-mirrors.txt` 及 sources 中的 `ec2.archive.ubuntu.com` 动态替换为高带宽稳定的 `azure.archive.ubuntu.com`；
   4. 增加单步限时 `timeout-minutes: 10` 并将 Job 超时放宽至 `timeout-minutes: 40`，保证大包下载与极端重试时不阻断后续业务流水线。
+- **实测验证**：
+  - 运行 [`44440188708`](https://github.com/huozao/meidi-auto/actions/runs/44440188708)（2026-11-19 09:55 北京时间）：Job 总耗时由超 30 分钟骤降至 **1 分 59 秒**！
+  - `Install Excel preview renderer` 步骤在十几秒内完成；
+  - 补跑昨晚（11-18）日报：11 个步骤全部成功完成，成功发送邮件（收件人 3 人，主题《【⚠️缺家里库存】美的库存及出入库日报｜2026-11-18｜库存、出入库及月计划》），坚果云归档 3 个文件（`RE/202611/`），出库趋势顺利聚合 9 月与 10 月快照。产物 `run-report.json` 显示 `success: true, failed_steps: []`。
 
 ### 2026-11-18 月末归档口径统一与出库趋势缺失修复交付
 
