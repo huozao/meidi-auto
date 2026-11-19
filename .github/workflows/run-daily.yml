@@ -31,11 +31,13 @@ jobs:
           key: apt-renderer-${{ runner.os }}-libreoffice-calc
 
       - name: Install Excel preview renderer
-        timeout-minutes: 6
+        timeout-minutes: 10
         run: |
           echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4
           echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99force-ipv4
           echo 'Acquire::Retries "3";' | sudo tee -a /etc/apt/apt.conf.d/99force-ipv4
+          sudo sed -i 's|http://.*ec2\.archive\.ubuntu\.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list /etc/apt/sources.list.d/* /etc/apt/apt-mirrors.txt 2>/dev/null || true
+          sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|http://azure.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libreoffice-calc fonts-noto-cjk poppler-utils
 

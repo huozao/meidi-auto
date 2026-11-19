@@ -36,7 +36,8 @@
 - **实施优化**（修改 `.github/workflows/run-daily.yml`）：
   1. 引入 `actions/cache@v4` 缓存 `/var/cache/apt/archives`（键 `apt-renderer-${{ runner.os }}-libreoffice-calc`），命中缓存时直接从 GitHub 存储恢复 deb 包，下载耗时降为秒级；
   2. 针对网络层增加 APT 防护：注入 `Acquire::ForceIPv4 "true";`、`Acquire::http::Timeout "20";` 与 `Acquire::Retries "3";`，遇到慢节点 20 秒断开快速重试；
-  3. 增加步骤级限时 `timeout-minutes: 6`，并适度放宽 Job 级超时至 `timeout-minutes: 40`，保证极端重试或大包下载时后续业务步骤有充足时间执行。
+  3. 彻底换掉经常抽风限速的 EC2 镜像源：在安装前自动将 `/etc/apt/apt-mirrors.txt` 及 sources 中的 `ec2.archive.ubuntu.com` 动态替换为高带宽稳定的 `azure.archive.ubuntu.com`；
+  4. 增加单步限时 `timeout-minutes: 10` 并将 Job 超时放宽至 `timeout-minutes: 40`，保证大包下载与极端重试时不阻断后续业务流水线。
 
 ### 2026-11-18 月末归档口径统一与出库趋势缺失修复交付
 
