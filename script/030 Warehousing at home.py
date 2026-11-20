@@ -83,6 +83,7 @@ CONFIG = {
     "src_sheet_for_copy": "第一页",  # 若存在则筛选生成“第一页副本”
     "warehouse_col_name": "仓库",
     "warehouse_keep_value": "成品库",
+    "warehouse_keep_values": ["成品库", "物料清单"],
     "copy_sheet_name": "第一页副本",
     "home_sheet_name": "家里库存",
     "home_cols": ["编号", "存货名称", "数量"],  # 家里库存三列表头
@@ -191,8 +192,9 @@ def main(cfg: dict):
         header = [c.value for c in s1[1]]
         if cfg["warehouse_col_name"] in header:
             idx = header.index(cfg["warehouse_col_name"])
+            keep_vals = cfg.get("warehouse_keep_values") or [cfg.get("warehouse_keep_value", "成品库")]
             rows = [r for r in s1.iter_rows(min_row=2, values_only=True)
-                    if r[idx] == cfg["warehouse_keep_value"]]
+                    if r[idx] in keep_vals]
             s_copy = wb.create_sheet(cfg["copy_sheet_name"])
             s_copy.append(header)
             for r in rows:
