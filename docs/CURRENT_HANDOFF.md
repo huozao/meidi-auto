@@ -1,6 +1,6 @@
 # 美的库存自动化：当前交接状态
 
-> 更新日期：2026-11-20。新会话处理本项目时先读本文，再按需阅读
+> 更新日期：2026-11-21。新会话处理本项目时先读本文，再按需阅读
 > `README.md`、`docs/PIPELINE_FLOW.md` 和 `docs/MONTHLY_SUMMARY_SPEC.md`。
 
 本文的 SHA、运行记录与资源缺口是上述日期的交接快照，后续线上状态需重新取证。
@@ -9,7 +9,7 @@
 ## 代码、数据与执行边界
 
 - **唯一代码源**：GitHub 仓库 `huozao/meidi-auto` 的 `main`。WSL 工作目录只作为开发、排查和本地验证副本；不得以本地未推送代码作为生产版本。
-- **当前上线基线**：`a339db7`（GitHub `main`，2026-11-20）。
+- **当前上线基线**：`fef8d62`（GitHub `main`，2026-11-20，030 支持物料清单分类仓库名兼容）。
 - **业务数据不入 Git**：邮件附件、月末快照、Excel/HTML 报告和坚果云同步文件均是运行数据；邮箱与 WebDAV 凭据只存在 WSL `.env` 或 GitHub Actions Secrets。
 - **凭据双轨体系**：
   1. **生产流水线**：正本在 `infra/secrets/meidi-auto.enc.env`（SOPS），由 GitHub Secrets 消费；
@@ -23,6 +23,16 @@
 - 工作流：`Run MeidiAuto Pipeline`（`.github/workflows/run-daily.yml`）。仅保留 `workflow_dispatch`，没有 GitHub cron。
 - 正常自动链路：Gmail Watch -> Pub/Sub -> `gmail-watcher` Cloud Run -> GitHub `workflow_dispatch` -> 本仓工作流；人工复核也可以在 Actions 页面、桌面助手或用 `gh workflow run` 手动发起。
 - **验收不能只看 Actions 绿灯**：该工作流对仅 `020 Email download.py` 失败存在软失败放行。必须同时检查 artifact 的 `run-report.json`、`failed_steps` 以及日志中的“邮件发送成功”。
+
+### 2026-11-21 上游 T+ 家里库存推送暂时停用与流水线降级约定
+
+- **业务背景**：
+  - 经业务确认，由于目前仓管人员尚未常态化及时在 T+ 中录入实际出入库单据，系统账面存量无法准确反映家里真实物理库存。
+  - 为避免向日报及生产决策提供不准确数据，上游服务器（`txecs`）已于 2026-11-21 暂时停用早晚定时推送（Crontab 注释且脚本内置安全开关 `PUSH_HOME_STOCK_ENABLED=0` 拦截）。
+- **当前流水线运行行为**：
+  - 自动进入降级模式：当收件箱无新的家里库存邮件时，`020 Email download.py` 自动判定家里库存未提供，生成 `.home-stock-unavailable` 标记及占位 Excel，流水线平滑进入缺家里库存降级模式；
+  - 稳态输出：日报正常核算外仓收发存，“月计划缺口”与“排产”列留空，正文展示黄色警示横幅，确保不因不准确的家里库存误导生产；
+  - 未来无缝恢复：待仓管人员完成准确信息录入、上游恢复发信后，流水线无需改动即可自动恢复家里库存回填。
 
 ### 2026-11-20 家里库存物料清单品类全量推送与 030 仓库名双向兼容交付
 
